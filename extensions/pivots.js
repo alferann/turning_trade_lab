@@ -3,7 +3,7 @@
 // DeMark) de la periode precedente, traces en marches sur les barres de
 // chaque periode. Formule au choix : classique, Fibonacci, Camarilla, Woodie,
 // DeMark. Une sous-section par periode, ouverte par une case a cocher, avec
-// sa couleur.
+// sa couleur et son opacite.
 //
 // Les periodes se lisent sur la date de seance des barres : le footprint ne
 // datant pas les siennes, il n'y a la que les pivots journaliers. Une semaine
@@ -151,7 +151,8 @@ function calcul(g, r){
 }
 
 function sousSection(k, label, couleur){
-  return [{k:k, label:label + FILET, type:'check', defaut:true}, {k:k + 'C', label:'Couleur', type:'color', defaut:couleur}];
+  return [{k:k, label:label + FILET, type:'check', defaut:true}, {k:k + 'C', label:'Couleur', type:'color', defaut:couleur},
+    {k:k + 'O', label:'Opacité', type:'number', defaut:1, min:0.05, max:1, pas:0.05}];
 }
 
 var def = {
@@ -172,7 +173,7 @@ var def = {
     var deb = Math.max(0, g.premiere | 0), fin = Math.min(g.derniere | 0, (g.n | 0) - 1);
     if(fin < deb) return;
     for(var t = 0; t < PERIODES.length; t++){
-      var T = PERIODES[t], L = P[T.k], col = r[T.k + 'C'];
+      var T = PERIODES[t], L = P[T.k], col = r[T.k + 'C'], op = +r[T.k + 'O'];
       if(!r[T.k]) continue;
       for(var k = 0; k < L.length; k++){
         var p = L[k];
@@ -181,8 +182,8 @@ var def = {
         var x0 = g.x(Math.max(p.deb, deb)), x1 = k === L.length - 1 ? F.droite : g.x(Math.min(p.fin, fin));
         for(var j = 0; j < p.niv.length; j++){
           var y = g.y(p.niv[j][1]), nom = p.niv[j][0];
-          g.trait([[x0, y], [x1, y]], {couleur:col, epaisseur:nom === 'PP' ? 1.5 : 1});
-          if(r.etiq) g.texte(Math.max(x0, F.gauche) + 3 * e, y - 2 * e, T.p + nom, {couleur:col, taille:10, base:'bottom'});
+          g.trait([[x0, y], [x1, y]], {couleur:col, opacite:op, epaisseur:nom === 'PP' ? 1.5 : 1});
+          if(r.etiq) g.texte(Math.max(x0, F.gauche) + 3 * e, y - 2 * e, T.p + nom, {couleur:col, opacite:op, taille:10, base:'bottom'});
         }
       }
     }

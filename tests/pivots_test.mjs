@@ -146,9 +146,14 @@ const de = (B, f) => hlc(B.filter(f));
   rec.length = 0; E.dessine(g(B, 'eth', debut), avec({ ...col, sem: false, mois: false, formule: 'demark' }));
   assert.equal(rec.filter(x => x.k === 'trait').length, 5 * 3, 'DeMark : PP, R1, S1');
 
-  // Settings panel: one sub-section per period, opened by a checkbox, then its colour.
+  rec.length = 0; E.dessine(g(B, 'eth', debut), avec({ ...col, semO: 0.4 }));
+  assert.ok(rec.filter(x => x.o.couleur === '#000002').every(x => x.o.opacite === 0.4), 'opacité hebdo, trait et étiquette');
+  assert.ok(rec.filter(x => x.o.couleur !== '#000002').every(x => x.o.opacite === 1), 'autres périodes opaques');
+
+  // Settings panel: one sub-section per period, opened by a checkbox, then its colour and opacity.
   assert.deepEqual(Array.from(E.reglages.filter(x => x.type === 'check'), x => x.k), ['rth', 'etiq', 'jour', 'sem', 'mois']);
   assert.deepEqual(['jour', 'sem', 'mois'].map(k => E.reglages[E.reglages.findIndex(x => x.k === k) + 1].k), ['jourC', 'semC', 'moisC']);
+  assert.deepEqual(['jour', 'sem', 'mois'].map(k => E.reglages[E.reglages.findIndex(x => x.k === k) + 2].k), ['jourO', 'semO', 'moisO']);
 }
 
 // 7. Incremental: the last known bar grows, then a new session opens; same pivots as from scratch.
