@@ -2,7 +2,7 @@
 // journee (la seance du graphe), la semaine ISO ou le mois, avec jusqu'a six
 // paliers d'ecart-type libres (multiplicateur, couleur, epaisseur, style et
 // opacite de la bande interieure pour chacun) et des themes de couleurs.
-// Trois instances identiques (A, B, C) pour superposer plusieurs ancrages.
+// Six instances identiques (A a F) pour superposer plusieurs ancrages.
 // Reglages en sous-sections : une case a cocher par trait (VWAP, σ1 a σ6)
 // fait office de titre, le panneau de TT n'en ayant pas.
 //
@@ -49,7 +49,7 @@ for(var mn = 0; mn < 1440; mn += 15) HEURES.push([String(mn), (mn / 60 < 10 ? '0
 var FICHIER = 'vwap_pro.js';
 var DESC = {fr:'VWAP ancré (séance US, Asie, Europe, jour, semaine, mois), jusqu\'à six écarts-types libres, remplissage bande par bande, thèmes. Instance ',
             en:'Anchored VWAP (US, Asian, European session, day, week, month), up to six free standard deviations, band-by-band fill, themes. Instance '};
-var DESC_FIN = {fr:' sur trois (A, B, C), pour superposer plusieurs ancrages.', en:' of three (A, B, C), to stack several anchors.'};
+var DESC_FIN = {fr:' sur six (A à F), pour superposer plusieurs ancrages.', en:' of six (A to F), to stack several anchors.'};
 var EN = {
   'Ancrage':'Anchoring', 'Journalier (séance du graphe)':'Daily (chart session)', 'Séance US (RTH)':'US session (RTH)',
   'Séance Asie':'Asian session', 'Séance Europe':'European session', 'Hebdomadaire (semaine ISO)':'Weekly (ISO week)', 'Mensuel':'Monthly',
@@ -65,7 +65,7 @@ var EN = {
   'Plein':'Solid', 'Tirets':'Dashed', 'Pointillés':'Dotted', 'Pointillés fins':'Fine dots', 'Tiret-point':'Dash-dot',
   'VWAP Asie':'VWAP Asia'
 };
-['A', 'B', 'C'].forEach(function(l){
+['A', 'B', 'C', 'D', 'E', 'F'].forEach(function(l){
   var fr = DESC.fr + l + DESC_FIN.fr, en = DESC.en + l + DESC_FIN.en, suffixe = ' (extensions/' + FICHIER + ')';
   EN[fr] = en; EN[fr + suffixe] = en + suffixe;
 });
@@ -325,5 +325,8 @@ function instance(lettre, d){
 instance('A', {anc:'jour', theme:'perso'});
 instance('B', {anc:'us',   theme:'neon'});
 instance('C', {anc:'sem',  theme:'ocean'});
+instance('D', {anc:'mois', theme:'feu'});
+instance('E', {anc:'eu',   theme:'pastel'});
+instance('F', {anc:'asie', theme:'mono'});
 
 })();

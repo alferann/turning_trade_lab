@@ -51,7 +51,7 @@ Sept familles de niveaux calculées sur le graphe, VWAP et écarts-types, profil
 
 ### VWAP Pro, `vwap_pro.js`
 
-VWAP ancré au choix sur la séance US (RTH), Asie, Europe, la journée, la semaine ISO ou le mois, avec jusqu'à six écarts-types libres (multiplicateur, couleur, épaisseur, style et opacité de remplissage pour chacun), réglés en sous-sections, et thèmes de couleurs. Les heures de séance suivent les sessions monde de TT ou se forcent dans le fuseau voulu. Trois instances A, B, C pour superposer plusieurs ancrages. Prise en main : [`docs/vwap_pro.md`](docs/vwap_pro.md).
+VWAP ancré au choix sur la séance US (RTH), Asie, Europe, la journée, la semaine ISO ou le mois, avec jusqu'à six écarts-types libres (multiplicateur, couleur, épaisseur, style et opacité de remplissage pour chacun), réglés en sous-sections, et thèmes de couleurs. Les heures de séance suivent les sessions monde de TT ou se forcent dans le fuseau voulu. Six instances, de A à F, pour superposer plusieurs ancrages. Prise en main : [`docs/vwap_pro.md`](docs/vwap_pro.md).
 
 ### Points pivots, `pivots.js`
 

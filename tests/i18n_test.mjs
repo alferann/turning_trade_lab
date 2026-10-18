@@ -13,7 +13,8 @@ const DICO_TT = path.join(process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Termi
 
 // Proper names that read the same in both languages; strings without a lowercase letter are skipped too.
 const NEUTRES = new Set(['New York', 'Chicago', 'Paris', 'Tokyo', 'Hong Kong', 'Sydney', 'Turning Trade',
-  'Fibonacci', 'Camarilla', 'Woodie', 'DeMark', 'Confluence Scanner','VWAP Pro · A', 'VWAP Pro · B', 'VWAP Pro · C']);
+  'Fibonacci', 'Camarilla', 'Woodie', 'DeMark', 'Confluence Scanner','VWAP Pro · A', 'VWAP Pro · B', 'VWAP Pro · C',
+  'VWAP Pro · D', 'VWAP Pro · E', 'VWAP Pro · F']);
 
 // Runs a script with a fake HFQI18n that keeps what it registers in English.
 function charger(fichier, defs) {
