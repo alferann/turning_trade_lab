@@ -6,7 +6,7 @@
 
 ## En deux mots
 
-Le VWAP de Turning Trade est journalier et s'arrête à deux écarts-types. VWAP Pro reprend le même calcul et l'ancre où vous voulez : séance US (RTH), séance Asie, séance Europe, journée, semaine ou mois. Chaque instance porte jusqu'à six paliers d'écart-type dont vous choisissez le multiplicateur (1, 2, 2,5, 3,2, 3,9…), la couleur, l'épaisseur, le style et l'opacité de remplissage, bande par bande, plus des thèmes de couleurs tout faits. Trois instances identiques, A, B et C, pour superposer par exemple le VWAP du jour, celui de RTH et celui de la semaine.
+Le VWAP de Turning Trade est journalier et s'arrête à deux écarts-types. VWAP Pro reprend le même calcul et l'ancre où vous voulez : séance US (RTH), séance Asie, séance Europe, journée, semaine ou mois. Chaque instance porte jusqu'à six paliers d'écart-type dont vous choisissez le multiplicateur (1, 2, 2,5, 3,2, 3,9…), la couleur, l'épaisseur, le style et l'opacité de remplissage, bande par bande, plus des thèmes de couleurs tout faits. Six instances identiques, de A à F, pour superposer par exemple le VWAP du jour, celui de RTH et celui de la semaine.
 
 ## Un peu de maths
 
@@ -33,7 +33,7 @@ Ce que ça change pour la décision : la pente du VWAP dit qui domine la périod
 
 ## Configurer
 
-Les mêmes réglages existent sur A, B et C ; seuls l'ancrage et le thème par défaut diffèrent (A : journalier, couleurs perso ; B : séance US, thème Néon ; C : hebdomadaire, thème Océan). Le panneau se lit en sous-sections : les réglages généraux, puis une sous-section par trait, VWAP puis σ1 à σ6, ouverte par une case à cocher qui allume ou éteint ce trait.
+Les mêmes réglages existent sur les six instances ; seuls l'ancrage et le thème par défaut diffèrent (A : journalier, couleurs perso ; B : séance US, thème Néon ; C : hebdomadaire, thème Océan ; D : mensuel, thème Feu ; E : séance Europe, thème Pastel ; F : séance Asie, thème Monochrome). Le panneau se lit en sous-sections : les réglages généraux, puis une sous-section par trait, VWAP puis σ1 à σ6, ouverte par une case à cocher qui allume ou éteint ce trait.
 
 | Réglage | Rôle | Défaut |
 |---|---|---|
@@ -53,7 +53,7 @@ Les mêmes réglages existent sur A, B et C ; seuls l'ancrage et le thème par d
 
 ### Limites connues
 
-- Six paliers au plus par instance ; trois instances au plus, parce que Turning Trade n'accepte qu'une étude par identifiant et mémorise les réglages par identifiant (pas de duplication d'une étude avec d'autres réglages). Il n'y a pas de champ texte dans le panneau de réglages de TT, d'où des paliers fixes plutôt qu'une liste libre.
+- Six paliers au plus par instance ; six instances au plus, parce que Turning Trade n'accepte qu'une étude par identifiant et mémorise les réglages par identifiant (pas de duplication d'une étude avec d'autres réglages). Il n'y a pas de champ texte dans le panneau de réglages de TT, d'où des paliers fixes plutôt qu'une liste libre.
 - Le panneau de TT n'a pas de vrai titre de section : chaque sous-section commence par sa case à cocher, suivie d'un filet.
 - Les séances Asie et Europe n'ont de barres que sur un graphe ETH ; sur un graphe RTH elles ne dessinent rien.
 - Le footprint ne date pas ses barres : l'hebdomadaire et le mensuel y retombent sur la séance affichée, et les heures de séance sont lues à la date du jour.
@@ -68,7 +68,7 @@ Les mêmes réglages existent sur A, B et C ; seuls l'ancrage et le thème par d
 
 ## In short
 
-Turning Trade's VWAP is daily and stops at two standard deviations. VWAP Pro keeps the same math and anchors it where you want: US session (RTH), Asian session, European session, day, week or month. Each instance carries up to six standard-deviation levels whose multiplier (1, 2, 2.5, 3.2, 3.9…), colour, thickness, style and fill opacity you choose band by band, plus ready-made colour themes. Three identical instances, A, B and C, let you stack for instance the daily, the RTH and the weekly VWAP.
+Turning Trade's VWAP is daily and stops at two standard deviations. VWAP Pro keeps the same math and anchors it where you want: US session (RTH), Asian session, European session, day, week or month. Each instance carries up to six standard-deviation levels whose multiplier (1, 2, 2.5, 3.2, 3.9…), colour, thickness, style and fill opacity you choose band by band, plus ready-made colour themes. Six identical instances, A to F, let you stack for instance the daily, the RTH and the weekly VWAP.
 
 ## A bit of math
 
@@ -95,7 +95,7 @@ What it changes for the decision: the slope of the VWAP says who dominates the p
 
 ## Settings
 
-The same settings exist on A, B and C; only the default anchor and theme differ (A: daily, custom colours; B: US session, Neon theme; C: weekly, Ocean theme). The panel reads in sub-sections: general settings, then one sub-section per line, VWAP then σ1 to σ6, opened by a checkbox that turns that line on or off. Labels below are those shown when Turning Trade is set to English.
+The same settings exist on all six instances; only the default anchor and theme differ (A: daily, custom colours; B: US session, Neon theme; C: weekly, Ocean theme; D: monthly, Fire theme; E: European session, Pastel theme; F: Asian session, Monochrome theme). The panel reads in sub-sections: general settings, then one sub-section per line, VWAP then σ1 to σ6, opened by a checkbox that turns that line on or off. Labels below are those shown when Turning Trade is set to English.
 
 | Setting | Role | Default |
 |---|---|---|
@@ -115,7 +115,7 @@ The same settings exist on A, B and C; only the default anchor and theme differ 
 
 ### Known limits
 
-- At most six levels per instance and three instances, because Turning Trade accepts one study per id and stores settings per id (a study cannot be duplicated with other settings). TT's settings panel has no text field, hence fixed slots rather than a free list.
+- At most six levels per instance and six instances, because Turning Trade accepts one study per id and stores settings per id (a study cannot be duplicated with other settings). TT's settings panel has no text field, hence fixed slots rather than a free list.
 - TT's panel has no real section title: each sub-section starts with its checkbox, followed by a rule.
 - Asian and European sessions only have bars on an ETH chart; on an RTH chart they draw nothing.
 - The footprint does not date its bars: weekly and monthly fall back to the displayed session there, and session hours are read at today's date.

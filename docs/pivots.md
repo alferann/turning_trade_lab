@@ -31,7 +31,7 @@ Ce que ça change pour la décision : des niveaux connus d'avance pour placer ci
 ## Lire le graphe
 
 - **Segments horizontaux**, un par niveau et par période, sur les barres de la période. La période en cours se prolonge jusqu'au bord droit.
-- **PP plus épais** que les résistances et supports, tous dans la couleur de la période.
+- **PP plus épais** que les résistances et supports, tous dans la couleur et l'opacité de la période, étiquettes comprises.
 - **Étiquettes** au début de chaque segment : `PP`, `R1`… pour le journalier, `wPP`, `wR1`… pour l'hebdomadaire, `mPP`, `mR1`… pour le mensuel.
 - Le mensuel se dessine sous l'hebdomadaire, lui-même sous le journalier.
 
@@ -46,10 +46,13 @@ Les réglages généraux, puis une sous-section par période ouverte par sa case
 | Étiquettes | Noms des niveaux au début des segments | cochée |
 | **Pivots journaliers** | Case à cocher : affiche ou masque les pivots de la séance | cochée |
 | Couleur | Couleur des pivots journaliers | bleu |
+| Opacité | Opacité des traits et étiquettes des pivots journaliers, de 0,05 à 1 | 1 |
 | **Pivots hebdomadaires** | Case à cocher : affiche ou masque les pivots de la semaine | cochée |
 | Couleur | Couleur des pivots hebdomadaires | orange |
+| Opacité | Opacité des traits et étiquettes des pivots hebdomadaires, de 0,05 à 1 | 1 |
 | **Pivots mensuels** | Case à cocher : affiche ou masque les pivots du mois | cochée |
 | Couleur | Couleur des pivots mensuels | rose |
+| Opacité | Opacité des traits et étiquettes des pivots mensuels, de 0,05 à 1 | 1 |
 
 ### Limites connues
 
@@ -92,7 +95,7 @@ What it changes for the decision: levels known in advance to place targets, stop
 ## Reading the chart
 
 - **Horizontal segments**, one per level and period, over the period's bars. The current period extends to the right edge.
-- **PP thicker** than resistances and supports, all in the period's colour.
+- **PP thicker** than resistances and supports, all in the period's colour and opacity, labels included.
 - **Labels** at the start of each segment: `PP`, `R1`… for daily, `wPP`, `wR1`… for weekly, `mPP`, `mR1`… for monthly.
 - Monthly is drawn under weekly, itself under daily.
 
@@ -107,10 +110,13 @@ General settings, then one sub-section per period opened by its checkbox, follow
 | Labels | Level names at the start of segments | checked |
 | **Daily pivots** | Checkbox: shows or hides the session pivots | checked |
 | Color | Colour of the daily pivots | blue |
+| Opacity | Opacity of the daily pivots lines and labels, from 0.05 to 1 | 1 |
 | **Weekly pivots** | Checkbox: shows or hides the week pivots | checked |
 | Color | Colour of the weekly pivots | orange |
+| Opacity | Opacity of the weekly pivots lines and labels, from 0.05 to 1 | 1 |
 | **Monthly pivots** | Checkbox: shows or hides the month pivots | checked |
 | Color | Colour of the monthly pivots | pink |
+| Opacity | Opacity of the monthly pivots lines and labels, from 0.05 to 1 | 1 |
 
 ### Known limits
 

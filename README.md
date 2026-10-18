@@ -10,7 +10,7 @@
 
 | Étude | Fichier | En bref | Prise en main |
 |---|---|---|---|
-| VWAP Pro | `extensions/vwap_pro.js` | VWAP ancré sur la séance US, Asie ou Europe, le jour, la semaine ou le mois ; jusqu'à six écarts-types libres ; trois instances à superposer | [`docs/vwap_pro.md`](docs/vwap_pro.md) |
+| VWAP Pro | `extensions/vwap_pro.js` | VWAP ancré sur la séance US, Asie ou Europe, le jour, la semaine ou le mois ; jusqu'à six écarts-types libres ; six instances à superposer | [`docs/vwap_pro.md`](docs/vwap_pro.md) |
 | Points pivots | `extensions/pivots.js` | PP, R1 à R3, S1 à S3 journaliers, hebdomadaires et mensuels ; formule classique, Fibonacci, Camarilla, Woodie ou DeMark | [`docs/pivots.md`](docs/pivots.md) |
 | Divergences CVD | `extensions/cvd_div.js` | Divergences entre le prix et le delta cumulé (UE, UA, DE, DA), suivies jusqu'à confirmation ou cassure, avec notifications ; volet CVD dans le même fichier | [`docs/divergences_cvd.md`](docs/divergences_cvd.md) |
 
@@ -55,7 +55,7 @@ Third-party studies for [Turning Trade](https://turningtrade.com), the futures t
 
 | Study | File | In short | Getting started |
 |---|---|---|---|
-| VWAP Pro | `extensions/vwap_pro.js` | VWAP anchored on the US, Asian or European session, the day, the week or the month; up to six free standard deviations; three instances to stack | [`docs/vwap_pro.md`](docs/vwap_pro.md) |
+| VWAP Pro | `extensions/vwap_pro.js` | VWAP anchored on the US, Asian or European session, the day, the week or the month; up to six free standard deviations; six instances to stack | [`docs/vwap_pro.md`](docs/vwap_pro.md) |
 | Pivot Points | `extensions/pivots.js` | Daily, weekly and monthly PP, R1 to R3, S1 to S3; classic, Fibonacci, Camarilla, Woodie or DeMark formula | [`docs/pivots.md`](docs/pivots.md) |
 | CVD Divergences | `extensions/cvd_div.js` | Divergences between price and cumulative delta (UE, UA, DE, DA), tracked until confirmed or broken, with notifications; CVD pane in the same file | [`docs/divergences_cvd.md`](docs/divergences_cvd.md) |
 

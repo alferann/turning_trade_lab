@@ -19,8 +19,8 @@ const J = e => !e || !e.length ? { n: 0, prix: () => 0, bid: () => 0, ask: () =>
 // No HFQSessionsMonde in the context: the study falls back to its built-in session defaults.
 const defs = [];
 vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console }));
-assert.equal(defs.length, 3, 'trois instances');
-assert.deepEqual(defs.map(d => d.id), ['vwap-pro-a', 'vwap-pro-b', 'vwap-pro-c'], 'ids stables');
+assert.equal(defs.length, 6, 'six instances');
+assert.deepEqual(defs.map(d => d.id), ['vwap-pro-a', 'vwap-pro-b', 'vwap-pro-c', 'vwap-pro-d', 'vwap-pro-e', 'vwap-pro-f'], 'ids stables');
 const A = defs[0];
 const defaut = Object.fromEntries(A.reglages.map(x => [x.k, x.defaut]));
 const avec = o => Object.assign({}, defaut, o);
