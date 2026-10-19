@@ -13,6 +13,7 @@
 | VWAP Pro | `extensions/vwap_pro.js` | VWAP ancré sur la séance US, Asie ou Europe, le jour, la semaine ou le mois ; jusqu'à six écarts-types libres ; six instances à superposer | [`docs/vwap_pro.md`](docs/vwap_pro.md) |
 | Points pivots | `extensions/pivots.js` | PP, R1 à R3, S1 à S3 journaliers, hebdomadaires et mensuels ; formule classique, Fibonacci, Camarilla, Woodie ou DeMark | [`docs/pivots.md`](docs/pivots.md) |
 | Divergences CVD | `extensions/cvd_div.js` | Divergences entre le prix et le delta cumulé (UE, UA, DE, DA), suivies jusqu'à confirmation ou cassure, avec notifications ; volet CVD dans le même fichier | [`docs/divergences_cvd.md`](docs/divergences_cvd.md) |
+| POC par barre | `extensions/poc_barre.js` | Le prix le plus échangé de chaque barre, en trait sur la largeur du corps de la bougie ; une couleur ou teinté par le delta | [`docs/poc_barre.md`](docs/poc_barre.md) |
 
 ## Installer
 
@@ -32,6 +33,7 @@ Chaque étude a un banc Node (testé avec Node.js 26) qui la rejoue sur des barr
 node tests/vwap_pro_test.mjs
 node tests/pivots_test.mjs
 node tests/cvd_div_test.mjs
+node tests/poc_barre_test.mjs
 node tests/i18n_test.mjs   # anglais de toutes les études, comparé au dictionnaire de Turning Trade (TT_PAYLOAD)
 ```
 
@@ -58,6 +60,7 @@ Third-party studies for [Turning Trade](https://turningtrade.com), the futures t
 | VWAP Pro | `extensions/vwap_pro.js` | VWAP anchored on the US, Asian or European session, the day, the week or the month; up to six free standard deviations; six instances to stack | [`docs/vwap_pro.md`](docs/vwap_pro.md) |
 | Pivot Points | `extensions/pivots.js` | Daily, weekly and monthly PP, R1 to R3, S1 to S3; classic, Fibonacci, Camarilla, Woodie or DeMark formula | [`docs/pivots.md`](docs/pivots.md) |
 | CVD Divergences | `extensions/cvd_div.js` | Divergences between price and cumulative delta (UE, UA, DE, DA), tracked until confirmed or broken, with notifications; CVD pane in the same file | [`docs/divergences_cvd.md`](docs/divergences_cvd.md) |
+| Bar POC | `extensions/poc_barre.js` | The most traded price of each bar, as a line across the candle body; one color or tinted by the delta | [`docs/poc_barre.md`](docs/poc_barre.md) |
 
 The getting-started guides are in French first, then in English.
 
@@ -79,6 +82,7 @@ Each study has a Node bench (tested with Node.js 26) that replays it on real ES 
 node tests/vwap_pro_test.mjs
 node tests/pivots_test.mjs
 node tests/cvd_div_test.mjs
+node tests/poc_barre_test.mjs
 node tests/i18n_test.mjs   # English of every study, checked against Turning Trade's dictionary (TT_PAYLOAD)
 ```
 
