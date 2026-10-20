@@ -22,7 +22,7 @@ var RTH_M = 930;
 // Anglais : noms, descriptions, reglages, options, textes du canevas et des
 // notifications. Les descriptions portent aussi le suffixe que le panneau ajoute.
 var DESC_PRIX = 'UE/UA/DE/DA entre pivots du prix qui ont un pivot CVD à côté, zones de pré-tir, alertes. Porte les réglages de détection du volet CVD.';
-var DESC_CVD = 'Chandeliers de delta cumulé, axes nus, mêmes divergences que l\'étude prix (réglages de détection lus là-bas).';
+var DESC_CVD = 'Chandeliers de delta cumulé, mèches lues sur la tape de la séance, axes nus, mêmes divergences que l\'étude prix (réglages de détection lus là-bas).';
 var EN = {
   'Divergences CVD · prix':'CVD Divergences · price', 'Divergences CVD · volet CVD':'CVD Divergences · CVD pane',
   'Ancrage CVD':'CVD anchor', 'ETH / séance du graphe':'ETH / chart session', 'Comparer sur':'Compare on', 'Mèche':'Wick', 'Clôture':'Close',
@@ -41,7 +41,7 @@ var EN = {
   'Point au pivot B':'Dot at pivot B', 'Rayon du point (px)':'Dot radius (px)', 'Triangle au pivot B':'Triangle at pivot B',
   'Taille du triangle':'Triangle size', 'Écart pivot → triangle (px)':'Pivot → triangle gap (px)',
   'Notifier les formations (?)':'Notify forming ones (?)', 'Notifier les confirmées':'Notify confirmed ones',
-  'Style du CVD':'CVD style', 'Chandeliers':'Candles', 'Ligne':'Line', 'Axe des ordonnées':'Y axis', 'Côté de l\'axe':'Axis side',
+  'Style du CVD':'CVD style', 'Chandeliers':'Candles', 'Mèches (tape de la séance)':'Wicks (session tape)', 'Ligne':'Line', 'Axe des ordonnées':'Y axis', 'Côté de l\'axe':'Axis side',
   'Droite':'Right', 'Gauche':'Left', 'Axe zéro':'Zero line', 'Étiquette zéro':'Zero label', 'Couleur des axes':'Axis color',
   'Bougie CVD haussière':'CVD up candle', 'Bougie CVD baissière':'CVD down candle', 'Ligne CVD':'CVD line',
   'pré-tir':'pre-shot', 'Divergence CVD':'CVD divergence', 'en formation à':'forming at', 'confirmée à':'confirmed at',
@@ -49,7 +49,7 @@ var EN = {
   'CVD : aucun delta par barre sur ce graphe':'CVD: no per-bar delta on this chart'
 };
 EN[DESC_PRIX] = 'UE/UA/DE/DA between price pivots that have a CVD pivot nearby, pre-shot zones, alerts. Holds the detection settings of the CVD pane.';
-EN[DESC_CVD] = 'Cumulative delta candles, bare axes, same divergences as the price study (detection settings read there).';
+EN[DESC_CVD] = 'Cumulative delta candles, wicks read from the session tape, bare axes, same divergences as the price study (detection settings read there).';
 [DESC_PRIX, DESC_CVD].forEach(function(d){ EN[d + ' (extensions/cvd_div.js)'] = EN[d] + ' (extensions/cvd_div.js)'; });
 
 // Le panneau d'etudes s'ouvre dans la fenetre du terminal, au-dessus des
@@ -268,7 +268,7 @@ function preTir(S, r, H, sens, sig){
 function calc(g, r){
   var i0 = Math.max(0, g.premiere - 300), i1 = g.derniere;
   if(!(i1 > i0)) return null;
-  var idx = [], hi = [], lo = [], cv = [], dl = [], sk = [];
+  var idx = [], hi = [], lo = [], cv = [], dl = [], sk = [], mn = [];
   var cum = 0, cle = null, aDelta = false;
   var aNiv = (typeof g.niveaux === 'function');
   var rth = (r.anc === 'rth' && g.seance === 'eth');
@@ -289,6 +289,7 @@ function calc(g, r){
     cv.push(cum);
     dl.push(d);
     sk.push(c);
+    mn.push(+b.m);
   }
   var n = idx.length;
   if(n < 10) return null;
@@ -335,7 +336,49 @@ function calc(g, r){
   var pre = [], z;
   if((z = preTir(S, r, H0,  1, uniq))) pre.push(z);
   if((z = preTir(S, r, L0, -1, uniq))) pre.push(z);
-  return {idx:idx, cv:cv, dl:dl, sk:sk, sig:uniq, pre:pre, aDelta:aDelta};
+  return {idx:idx, cv:cv, dl:dl, sk:sk, mn:mn, sig:uniq, pre:pre, aDelta:aDelta};
+}
+
+// Meches du volet : extremes du delta cumule pendant la barre, que seule la
+// tape ordonne (g.prints, temps en secondes depuis l'ouverture comme `m`).
+// TT ne la sert que pour la seance affichee. Une barre n'a de meche que si sa
+// tape redonne exactement le delta de ses niveaux : barre hors tape, tape
+// commencee en cours de barre ou trou de flux, le corps reste seul.
+// Par barre, la plage de prints [a+1..b] et le chemin deja lu : la barre en
+// formation ne relit que ses nouveaux prints. Le premier passage sur une seance
+// chargee (480 000 prints sur ES) depasse 8 ms : l'image s'arrete a 5 ms depuis
+// `t0`, debut de dessine, calcul partage compris (2 a 4 ms par tick sur une
+// seance entiere), la suite a l'image suivante, demandee par HFQExt.redessiner().
+var MECHES = {cle:'', m:new Map()}, BUDGET_MS = 5;
+function maintenant(){ return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now(); }
+function meches(g, S, d0, t0){
+  var P = g.prints, out = {};
+  if(!P || !P.n || typeof P.avant !== 'function') return out;
+  var cle = [g.sym, g.seance, g.tf].join('|');
+  if(cle !== MECHES.cle){ MECHES.cle = cle; MECHES.m = new Map(); }
+  var jourDe = function(k){ return S.sk[k].replace(/R$/, ''); };
+  var avant = function(m){ return P.avant((Math.ceil(m * 6000) - 0.5) / 100); };
+  var der = g.barre(g.n - 1), jour = String((der && der._date) || ''), n = S.idx.length;
+  var suiv = g.barre(S.idx[n - 1] + 1), reste = false;
+  for(var k = d0; k < n && !reste; k++){
+    if(jourDe(k) !== jour) continue;
+    var fin = (k + 1 < n) ? (jourDe(k + 1) === jour ? S.mn[k + 1] : null)
+            : (suiv && String(suiv._date || '') === jour ? +suiv.m : null);
+    var a = avant(S.mn[k]), b = (fin == null) ? P.n - 1 : avant(fin);
+    var e = MECHES.m.get(S.idx[k]);
+    if(!e || e.a !== a || e.b > b){ e = {a:a, b:a, run:0, h:0, l:0}; MECHES.m.set(S.idx[k], e); }
+    for(var j = e.b + 1; j <= b; j++){
+      e.run += P.achat(j) ? P.taille(j) : -P.taille(j);
+      if(e.run > e.h) e.h = e.run; else if(e.run < e.l) e.l = e.run;
+      if(!(j & 4095) && maintenant() - t0 > BUDGET_MS){ reste = j < b; break; }
+    }
+    e.b = Math.min(j, b);
+    if(!reste && e.b > e.a && e.run === S.dl[k]) out[k] = e;
+  }
+  if(reste){
+    try{ if(typeof setTimeout !== 'undefined' && HFQExt.redessiner) setTimeout(function(){ HFQExt.redessiner(); }, 0); }catch(_){}
+  }
+  return out;
 }
 
 // Un calcul par image, partage par les deux etudes : la cle change avec la
@@ -536,6 +579,7 @@ HFQExt.etude({
   sousGraphe:{hauteur:0.24, auto:true, lignes:[[0,'#555']]},
   reglages:[
     {k:'style',label:'Style du CVD',type:'select',defaut:'bougies',options:[['bougies','Chandeliers'],['ligne','Ligne']]},
+    {k:'meches',label:'Mèches (tape de la séance)',type:'check',defaut:true},
     {k:'ordo',label:'Axe des ordonnées',type:'check',defaut:true},
     {k:'ordoCote',label:'Côté de l\'axe',type:'select',defaut:'droite',options:[['droite','Droite'],['gauche','Gauche']]},
     {k:'axe0',label:'Axe zéro',type:'check',defaut:true},
@@ -546,7 +590,7 @@ HFQExt.etude({
     {k:'ccvd',label:'Ligne CVD',type:'color',defaut:'#8b7bff'}
   ].concat(TRIANGLE, TEXTE),
   dessine:function(g, r){
-    var P = partages();
+    var t0 = maintenant(), P = partages();
     var S = calcCache(g, P);
     if(!S) return;
     if(!S.aDelta){
@@ -594,16 +638,21 @@ HFQExt.etude({
 
     if(r.style === 'bougies' && c){
       var pas = (S.idx.length > 1) ? Math.abs(g.x(S.idx[1]) - g.x(S.idx[0])) : 4 * e;
-      var w = Math.max(1, pas * 0.62);
+      var w = Math.max(1, pas * 0.62), lw = Math.max(1, e);
+      var M = r.meches ? meches(g, S, d0, t0) : {};
       c.save();
       for(i = d0; i < S.idx.length; i++){
         var ouv = (i > 0 && S.sk[i] === S.sk[i-1]) ? S.cv[i-1] : S.cv[i] - S.dl[i];
-        var clo = S.cv[i];
+        var clo = S.cv[i], x = g.x(S.idx[i]);
         var y1 = g.y(ouv), y2 = g.y(clo);
         var hb = Math.abs(y2 - y1);
         if(hb < 1) hb = 1;
         c.fillStyle = (clo >= ouv) ? r.cup : r.cdn;
-        c.fillRect(g.x(S.idx[i]) - w / 2, Math.min(y1, y2), w, hb);
+        if(M[i]){
+          var yh = g.y(ouv + M[i].h), yl = g.y(ouv + M[i].l);
+          c.fillRect(x - lw / 2, Math.min(yh, yl), lw, Math.abs(yl - yh));
+        }
+        c.fillRect(x - w / 2, Math.min(y1, y2), w, hb);
       }
       c.restore();
     } else {

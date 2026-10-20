@@ -20,11 +20,12 @@ const J = e => !e || !e.length ? { n: 0, deltaTotal: () => 0 }
   : { n: e.length, deltaTotal() { let d = 0; for (const r of e) d += (r[2] || 0) - (r[1] || 0); return d; } };
 
 // Loads the file in a fresh context: HFQExt stub, HFQNotify stub that records pushes.
-let defs, pushes, surch = {};
+let defs, pushes, surch = {}, demandes = 0;
 function charger() {
   defs = []; pushes = [];
   const HFQExt = {
     etude(d) { defs.push(d); return true; },
+    redessiner() { demandes++; },
     inventaire() {
       const p = defs.find(d => d.id === 'cvddiv-prix');
       return { etudes: [{ id: 'cvddiv-prix', reglages: p.reglages.map(x => ({ cle: x.k, valeur: x.k in surch ? surch[x.k] : x.defaut })) }] };
@@ -33,7 +34,7 @@ function charger() {
   // No HFQNotify in Turning Trade 0.4.6: the study falls back to desktop notifications.
   class Notification { constructor(titre, o) { pushes.push({ titre, texte: o && o.body }); } }
   Notification.permission = 'granted';
-  vm.runInContext(SRC, vm.createContext({ HFQExt, window: {}, Notification, console, Math, String, Number, Object, Array, isNaN, isFinite, NaN, Infinity }));
+  vm.runInContext(SRC, vm.createContext({ HFQExt, window: {}, Notification, setTimeout: f => f(), performance, console, Math, String, Number, Object, Array, isNaN, isFinite, NaN, Infinity }));
   return { prix: defs.find(d => d.id === 'cvddiv-prix'), cvd: defs.find(d => d.id === 'cvddiv-cvd') };
 }
 let { prix, cvd } = charger();
@@ -158,6 +159,102 @@ const tf = performance.now(); prix.dessine(G, rp); const froid = performance.now
 const t0 = performance.now(); for (let k = 0; k < 50; k++) { prix.dessine(G, rp); cvd.dessine(G, rc); }
 const ms = (performance.now() - t0) / 50;
 assert.ok(froid < 8 && ms < 8, 'budget 8 ms, mesuré froid ' + froid.toFixed(2) + ' chaud ' + ms.toFixed(2));
+
+// 11. Wicks of the CVD pane, read from the tape. Same shape as hfq-ext.js X(): times in
+//     centiseconds since the open, avant(s) = last print at or before s seconds.
+function ruban(cs, sz, sd) {
+  return { n: cs.length, t: k => cs[k] / 100, prix: () => 0, taille: k => sz[k], achat: k => sd[k] === 1,
+    avant(s) { const a = s * 100; let u = 0, c = cs.length; while (u < c) { const l = (u + c) >> 1; if (cs[l] <= a) u = l + 1; else c = l; } return u - 1; } };
+}
+// Canvas stub recording fillRect; x = 10 px per bar so a 1 px wick never looks like a 6.2 px body.
+function toile() {
+  let fs = null; const rects = [];
+  const t = { rects, fillRect(x, y, w, h) { rects.push({ x, y, w, h, fs }); }, get fillStyle() { return fs; }, set fillStyle(v) { fs = v; } };
+  return new Proxy(t, { get: (o, k) => k in o ? o[k] : () => {} });
+}
+// Draws frames until the study stops asking for a redraw; `images` and `pire` (worst frame, ms) are kept.
+let images, pire;
+function meches(B, P, r = {}, premiere = 0) {
+  let M;
+  for (images = 0, pire = 0, demandes = 1; demandes; images++) {
+    assert.ok(images < 50, 'rattrapage fini');
+    demandes = 0;
+    const c = toile(), G = Object.assign(g(B, premiere, B.length - 1, []), { ctx: c, x: i => i * 10, prints: P });
+    const t = performance.now(); cvd.dessine(G, Object.assign(defaut(cvd), r)); pire = Math.max(pire, performance.now() - t);
+    M = Object.fromEntries(c.rects.filter(q => q.w === 1).map(q => [Math.round(q.x / 10), [q.y, q.y + q.h]]));
+  }
+  return M;
+}
+{
+  ({ prix, cvd } = charger()); surch = {};
+  const d = [1, 2, 3, -1, -2, 4, 0, 1, 2, 5, -3, 2];
+  const B = d.map((x, m) => ({ _date: '2026-01-02', m, o: 100, h: 101, l: 99, c: 100, lv: [[100, x < 0 ? -x : 0, x > 0 ? x : 0]] }));
+  // Bar 9: +10 -7 +2 (last print 1 cs before bar 10), bar 10: -4 +6 -5 from its first
+  // centisecond, bar 11: +1 against a level delta of +2, so no wick.
+  const T = [[54500, 10, 1], [55000, 7, 0], [59999, 2, 1], [60000, 4, 0], [61000, 6, 1], [62000, 5, 0], [66500, 1, 1]];
+  const P = k => ruban(T.slice(0, k).map(p => p[0]), T.map(p => p[1]), T.map(p => p[2]));
+  // Opening CVD of bar 9 is 10, of bar 10 is 15: wicks 10..20 and 11..17.
+  const attendu = { 9: [10, 20], 10: [11, 17] };
+  assert.deepEqual(meches(B, P(5)), { 9: [10, 20] }, 'barre 10 incomplète : delta tape ≠ niveaux, pas de mèche');
+  assert.deepEqual(meches(B, P(7)), attendu, 'barre en formation étendue par ses nouveaux prints');
+  assert.deepEqual(meches(B, P(5)), { 9: [10, 20] }, 'retour en arrière du replay');
+  ({ prix, cvd } = charger());
+  assert.deepEqual(meches(B, P(7)), attendu, 'même résultat à froid');
+  assert.deepEqual(meches(B, P(7), { meches: false }), {}, 'mèches désactivables');
+  assert.deepEqual(meches(B, null), {}, 'sans tape, corps seul');
+}
+const DATA = path.dirname(DB);
+function tapeReelle(sym, date) {
+  const f = path.join(DATA, '_hmrust_rec_' + sym + '_' + date + '.dots');
+  if (!fs.existsSync(f)) return null;
+  const buf = fs.readFileSync(f), n = buf.length >> 4, cs = new Uint32Array(n), sz = new Uint32Array(n), sd = new Uint8Array(n);
+  // 16-byte records: centiseconds since the open, price row, size, side (1 = buyer aggressor).
+  for (let k = 0, o = 0; k < n; k++, o += 16) { cs[k] = buf.readUInt32LE(o); sz[k] = buf.readUInt32LE(o + 8); sd[k] = buf.readUInt32LE(o + 12); }
+  return { cs, sz, sd };
+}
+{
+  // Last session of the archive against its recorded tape, all sessions on the chart: only
+  // the tape day gets wicks, and exactly where the per-minute tape delta equals the levels.
+  const date = bars[N - 1]._date, R = tapeReelle('ES', date);
+  if (!R) console.warn('pas d\'enregistrement de tape, mèches réelles sautées :', date);
+  else {
+    ({ prix, cvd } = charger()); surch = {};
+    const parMin = new Map();
+    for (let k = 0; k < R.cs.length; k++) {
+      const m = Math.floor(R.cs[k] / 6000), e = parMin.get(m) || { run: 0, h: 0, l: 0 };
+      e.run += R.sd[k] === 1 ? R.sz[k] : -R.sz[k]; e.h = Math.max(e.h, e.run); e.l = Math.min(e.l, e.run); parMin.set(m, e);
+    }
+    const M = meches(bars, ruban(R.cs, R.sz, R.sd), {}, 300);
+    const attendu = {};
+    let cum = 0, cle = null;
+    for (let i = 0; i < N; i++) {
+      const b = bars[i], k = b._date + (b.m >= 930 ? 'R' : ''), dl = J(b.lv).deltaTotal();
+      if (k !== cle) { cum = 0; cle = k; }
+      const e = b._date === date && parMin.get(b.m);
+      if (i >= 300 && e && e.run === dl) attendu[i] = [cum + e.l, cum + e.h];
+      cum += dl;
+    }
+    assert.ok(Object.keys(attendu).length > 50, 'des minutes couvertes par la tape');
+    assert.deepEqual(M, attendu, 'mèches = extrêmes du delta cumulé de la tape, minute par minute');
+    console.log('  mèches ES', date, ':', Object.keys(M).length, 'barres sur', bars.filter(b => b._date === date).length, 'de la séance');
+  }
+  // Budget on the busiest recorded session, all of it visible: cold pass over the whole tape, then warm.
+  const date2 = '2026-10-16', R2 = tapeReelle('ES', date2);
+  if (R2) {
+    const B = db.sessions.find(s => s.date === date2).bars.map(b => Object.assign({ _date: date2 }, b)), P = ruban(R2.cs, R2.sz, R2.sd);
+    ({ prix, cvd } = charger()); surch = {};
+    // Each catch-up frame under 8 ms, then warm frames.
+    const M = meches(B, P), n = images, froid = pire;
+    meches(B, P); const chaud = pire;
+    assert.ok(n > 1 && froid < 8 && chaud < 8, 'budget mèches 8 ms, pire image ' + froid.toFixed(2) + ' chaud ' + chaud.toFixed(2));
+    ({ prix, cvd } = charger()); surch = {};
+    const fin = meches(B, P, {}, B.length - 30);
+    // The CVD starts at the window start, so a shifted window shifts the wicks: compare their spans.
+    const long = w => w && w[1] - w[0];
+    assert.ok(Object.keys(fin).length > 0 && Object.keys(fin).every(i => long(M[i]) === long(fin[i])), 'rattrapage = passage direct sur les barres visibles');
+    console.log('  mèches ES', date2, ':', R2.cs.length, 'prints,', Object.keys(M).length, 'barres |', n, 'images de rattrapage, pire', froid.toFixed(2), 'ms, chaud', chaud.toFixed(2), 'ms');
+  }
+}
 
 const parType = {}; for (const s of conf) parType[s.t + s.n] = (parType[s.t + s.n] || 0) + 1;
 console.log('OK', N, 'barres,', conf.length, 'signaux', JSON.stringify(parType), '| confirmées', confirmees.length, '| cassées', casses.length, '| en attente', conf.filter(s => s.etat === 'attente').length, '| égalités', conf.filter(s => s.pa === s.pb).length, '| calcul à froid', froid.toFixed(2), 'ms, deux études à chaud', ms.toFixed(2), 'ms/image');
