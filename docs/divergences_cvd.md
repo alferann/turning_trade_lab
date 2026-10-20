@@ -50,7 +50,7 @@ Ce que ça change pour la décision : une divergence confirmée au niveau où vo
 - **Bande de pré-tir** au niveau du dernier pivot retenu quand le prix y revient alors que le CVD diverge déjà : la divergence est possible, pas encore formée.
 - **Notification** de bureau pour chaque formation et chaque confirmation de la séance.
 
-Le volet CVD dessine le delta cumulé en chandeliers, un par barre, du cumul d'ouverture au cumul de clôture, avec l'axe zéro.
+Le volet CVD dessine le delta cumulé en chandeliers, un par barre, du cumul d'ouverture au cumul de clôture, avec l'axe zéro. La mèche montre le plus haut et le plus bas atteints par le cumul pendant la barre. Seule la tape (les exécutions une à une) donne cet ordre, et TT ne la fournit que pour la séance affichée, en direct ou rejouée. Une barre n'a donc de mèche que si sa tape redonne exactement son delta : les séances précédentes, ou une barre où la tape commence ou s'interrompt, gardent le corps seul. Au chargement d'une séance chargée, les mèches apparaissent en quelques images.
 
 ## Configurer
 
@@ -92,6 +92,7 @@ Les réglages de détection, de filtrage et de couleur vivent sur l'étude **Div
 | Écart marqueur → texte, étiquettes, taille, gras | les deux | Texte |
 | Notifier les formations, les confirmées | prix | Alertes de bureau |
 | Style du CVD, axes, couleurs des bougies | volet | Dessin du delta cumulé |
+| Mèches (tape de la séance) | volet | Mèches des chandeliers, là où la tape couvre la barre |
 
 ### Réglages conseillés
 
@@ -151,7 +152,7 @@ What it changes for a decision: a confirmed divergence at a level where you alre
 - **Pre-shot band** at the level of the last kept pivot when price comes back while CVD already diverges: the divergence is possible, not formed yet.
 - **Desktop notification** for each forming and each confirmed divergence of the session.
 
-The CVD pane draws cumulative delta as candles, one per bar, from the opening to the closing total, with the zero axis.
+The CVD pane draws cumulative delta as candles, one per bar, from the opening to the closing total, with the zero axis. The wick shows the highest and lowest total reached during the bar. Only the tape (trades one by one) gives that order, and TT only serves it for the displayed session, live or replayed. A bar therefore gets a wick only if its tape gives back exactly its delta: earlier sessions, or a bar where the tape starts or breaks off, keep the body alone. When a busy session loads, wicks appear within a few frames.
 
 ## Settings
 
@@ -193,6 +194,7 @@ Detection, filter and colour settings live on **Divergences CVD · prix**. The C
 | Marker → text gap, labels, size, bold | both | Text |
 | Notify forming ones, confirmed ones | price | Desktop alerts |
 | CVD style, axes, candle colors | pane | Cumulative delta drawing |
+| Wicks (session tape) | pane | Candle wicks, where the tape covers the bar |
 
 ### Suggested tuning
 
