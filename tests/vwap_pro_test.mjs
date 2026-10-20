@@ -77,14 +77,13 @@ const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a 
   assert.ok(Number.isNaN(C.vwap[bars.findIndex((b, i) => i >= iCur && b.m === 1320)]), 'fin auto à 16:00 ET');
 }
 
-// 5. Weekly and monthly: all four loaded sessions share one ISO week and one month.
+// 5. Weekly and monthly: the loaded sessions of the last one's ISO week and month, carried over each session open.
 {
-  const sem = new Set(db.sessions.map(s => A.outils.semaine(s.date.slice(0, 10))));
-  assert.equal(sem.size, 1, 'jeu de données sur une seule semaine');
-  const tout = brute(bars);
-  proche(A.calcul(g(), avec({ anc: 'sem' })).vwap[N - 1], tout.vwap, 'wVWAP');
-  proche(A.calcul(g(), avec({ anc: 'mois' })).vwap[N - 1], tout.vwap, 'mVWAP');
-  assert.ok(Number.isFinite(A.calcul(g(), avec({ anc: 'sem' })).vwap[iCur]), 'la semaine ne repart pas à l\'ouverture');
+  for (const [anc, cle] of [['sem', d => A.outils.semaine(d.slice(0, 10))], ['mois', d => d.slice(0, 7)]]) {
+    const S = db.sessions.filter(s => cle(s.date) === cle(cur.date)), C = A.calcul(g(), avec({ anc }));
+    proche(C.vwap[N - 1], brute(S.flatMap(s => s.bars)).vwap, anc + ' sur ' + S.length + ' séances');
+    proche(C.vwap[iCur], brute(S.slice(0, -1).flatMap(s => s.bars).concat([cur.bars[0]])).vwap, anc + ' : ouverture de la dernière séance');
+  }
 }
 
 // 6. Incremental cache: one more bar extends the sums instead of recomputing, same result as from scratch.

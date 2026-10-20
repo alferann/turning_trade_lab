@@ -188,7 +188,10 @@ const sierra = [pane('session', { title: 'Delta' }), pane('session', { title: 'V
   assert.equal(appels.length, 0, 'nouvelle barre juste après une image froide : cache');
   image();
   assert.deepEqual(appels, [['session', 90]], 'image suivante : séance recalculée, composite gardé');
-  appels.length = 0; B.push(Object.assign({}, B[B.length - 1], { _date: '2026-10-19', m: 0 })); image(); image();
+  // The next weekday after the archive's last session opens a new one.
+  const apres = new Date(B[B.length - 1]._date + 'T00:00:00Z');
+  do apres.setUTCDate(apres.getUTCDate() + 1); while (!(apres.getUTCDay() % 6));
+  appels.length = 0; B.push(Object.assign({}, B[B.length - 1], { _date: apres.toISOString().slice(0, 10), m: 0 })); image(); image();
   assert.deepEqual(appels.map(a => a[0]).sort(), ['rolling', 'session'], 'nouvelle séance : tout recalculé');
   appels.length = 0;
   const a = image().profils[0].noeuds.hvn.length, b = image(avec({ hvnProm: 60 })).profils[0].noeuds.hvn.length;
