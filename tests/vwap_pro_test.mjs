@@ -54,9 +54,14 @@ const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a 
   assert.deepEqual([...A.outils.bornesET('asie', '2026-10-14', defaut)], [1080, 180], 'Asie 18:00 → 03:00 ET');
 }
 
-// 3. Session anchors on an ETH chart: RTH is m ∈ [930, 1320), Europe [540, 930), Asia [0, 540); outside, nothing.
+// 3. Session anchors on an ETH chart: RTH is m ∈ [930, 1320), Asia runs from the open to Europe, which starts
+// at 08:00 London and so moves against ET between the two DST switches; outside, nothing.
 {
-  const fen = { us: [930, 1320], eu: [540, 930], asie: [0, 540] };
+  const fen = Object.fromEntries(['us', 'eu', 'asie'].map(anc => {
+    const [a, b] = A.outils.bornesET(anc, cur.date, defaut).map(v => (v - 1080 + 1440) % 1440);
+    return [anc, [a, b <= a ? b + 1440 : b]];
+  }));
+  assert.deepEqual(fen.us, [930, 1320], 'RTH en minutes de séance');
   for (const anc of Object.keys(fen)) {
     const C = A.calcul(g(), avec({ anc }));
     const dedans = [], dehors = [];
