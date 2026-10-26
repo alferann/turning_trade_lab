@@ -57,6 +57,7 @@ Les réglages généraux, puis une sous-section par période ouverte par sa case
 ### Limites connues
 
 - **Période précédente incomplète, pivots masqués.** Une semaine ou un mois ne donne de pivots à la suivante que s'il est chargé en entier, depuis son premier jour ouvré. L'historique ES de TT commençant le mardi 22 septembre 2026, il n'y a pas de pivots hebdomadaires pour la semaine du 28 septembre, ni de pivots mensuels en octobre. Ils apparaîtront dès que le graphe chargera le mois précédent en entier.
+- **Veille incomplète, pivots masqués.** Les pivots d'une séance ne sont tracés que si la séance précédente est chargée de sa première heure jusqu'à moins de 4 h de sa fin (une clôture anticipée de jour férié passe ; avec « Calcul sur RTH seul », c'est la fenêtre 09:30–16:00 qui doit être couverte). Cela arrive avec un historique qui commence en pleine séance, ou sur un graphe en ticks dont l'historique se charge encore : les pivots apparaissent dès que la veille est complète. Une semaine ou un mois qui contient une séance incomplète ne donne pas non plus de pivots à la période suivante.
 - Les jours fériés ne sont pas connus : une période dont le premier jour ouvré était férié passe pour incomplète si l'historique commence juste après, et reste masquée.
 - Le footprint ne date pas ses barres : seuls les pivots journaliers y sont tracés.
 - Pas de R4/S4 en Camarilla, pas de points médians.
@@ -121,6 +122,7 @@ General settings, then one sub-section per period opened by its checkbox, follow
 ### Known limits
 
 - **Incomplete previous period, pivots hidden.** A week or month only gives pivots to the next one if it is fully loaded, from its first weekday. TT's ES history starting on Tuesday 22 September 2026, there are no weekly pivots for the week of 28 September and no monthly pivots in October. They will show as soon as the chart loads the whole previous month.
+- **Incomplete previous session, pivots hidden.** A session's pivots are drawn only if the previous session is loaded from its first hour to less than 4 h before its end (an early holiday close still counts; with "Computed on RTH only", the 09:30–16:00 window must be covered). This happens with a history starting mid-session, or on a tick chart whose history is still loading: the pivots show as soon as the previous session is complete. A week or month holding an incomplete session gives no pivots to the next period either.
 - Holidays are not known: a period whose first weekday was a holiday counts as incomplete if the history starts right after it, and stays hidden.
 - The footprint does not date its bars: only daily pivots are drawn there.
 - No Camarilla R4/S4, no midpoints.
