@@ -1,8 +1,8 @@
 // Profil de volume par periode : le volume echange a chaque prix (bid + ask
 // des niveaux de chaque barre) sur la seance du graphe, la seance US, Asie
-// ou Europe, la semaine ISO ou le mois. Acheteurs et vendeurs empiles, ou
-// volume total colore par l'aire de valeur ; POC, VAH et VAL en lignes, leur
-// prix ecrit a gauche.
+// ou Europe, la semaine ISO ou le mois. Acheteurs et vendeurs empiles et
+// attenues hors de l'aire de valeur, ou volume total colore par elle ; POC,
+// VAH et VAL en lignes, leur prix ecrit a gauche.
 //
 // La periode en cours se colle au bord droit ou se pose sur ses barres. Les
 // periodes precedentes se posent sur les leurs, adossees a leur premiere
@@ -59,6 +59,7 @@ var EN = {
   'Ticks par rangée (0 = auto)':'Ticks per row (0 = auto)', 'Affichage du volume':'Volume display',
   'Acheteurs et vendeurs empilés':'Buyers and sellers stacked', 'Total, coloré par la Value Area':'Total, colored by the Value Area',
   'Couleur acheteurs':'Buyers color', 'Opacité acheteurs':'Buyers opacity', 'Couleur vendeurs':'Sellers color', 'Opacité vendeurs':'Sellers opacity',
+  'Opacité relative hors Value Area':'Relative opacity outside the Value Area',
   'Couleur hors Value Area':'Color outside the Value Area', 'Opacité hors Value Area':'Opacity outside the Value Area',
   'Opacité Value Area':'Value Area opacity', 'Couleur rangée POC':'POC row color', 'Opacité rangée POC':'POC row opacity',
   'Style':'Style', 'Pointillés fins':'Fine dots', 'Tiret-point':'Dash-dot', 'Étiquettes à gauche et légende':'Left labels and caption',
@@ -386,7 +387,8 @@ function rangees(R, pas){
 // Rectangles de l'histogramme d'un profil, adosse a x0 et tourne vers la
 // gauche (dir -1) ou la droite (dir 1), rangés par couleur dans Q ; la
 // rangee la plus fournie mesure W. Empile : les acheteurs contre
-// l'adossement, les vendeurs au bout.
+// l'adossement, les vendeurs au bout, attenues hors aire de valeur, la
+// rangee du POC cerclee.
 function histogramme(Q, g, r, R, pas, x0, dir, W){
   var F = g.cadre, e = g.echelle || 1, t = g.tick || 0.25, rows = rangees(R, pas), max = 0, k;
   for(k = 0; k < rows.length; k++) max = Math.max(max, rows[k][1] + rows[k][2]);
@@ -395,24 +397,25 @@ function histogramme(Q, g, r, R, pas, x0, dir, W){
     var y0 = Math.min(ya, yb), h = Math.abs(yb - ya);
     if(y0 > F.bas || y0 + h < F.haut) continue;
     if(h > 3 * e){ y0 += 0.5 * e; h -= e; }
-    var wv = W * rows[k][1] / max, wa = W * rows[k][2] / max;
+    var wv = W * rows[k][1] / max, wa = W * rows[k][2] / max, w = wa + wv, xw = dir < 0 ? x0 - w : x0;
+    var poc = R.poc >= i0 && R.poc <= i1, va = i1 >= R.val && i0 <= R.vah;
     if(r.mode === 'empile'){
-      Q.achat.push(dir < 0 ? x0 - wa : x0, y0, wa, h);
-      Q.vente.push(dir < 0 ? x0 - wa - wv : x0 + wa, y0, wv, h);
-    } else {
-      var w = wa + wv;
-      (R.poc >= i0 && R.poc <= i1 ? Q.poc : i1 >= R.val && i0 <= R.vah ? Q.va : Q.hors).push(dir < 0 ? x0 - w : x0, y0, w, h);
-    }
+      (va ? Q.achat : Q.achatH).push(dir < 0 ? x0 - wa : x0, y0, wa, h);
+      (va ? Q.vente : Q.venteH).push(dir < 0 ? x0 - w : x0 + wa, y0, wv, h);
+      if(poc) Q.cadre.push(xw, y0, w, h);
+    } else (poc ? Q.poc : va ? Q.va : Q.hors).push(xw, y0, w, h);
   }
 }
 
-// Un seul remplissage par couleur, pour tous les profils de l'image.
-function peindre(c, Q, couleur, op){
+// Un seul remplissage par couleur, pour tous les profils de l'image ; un
+// contour d'epaisseur `trait` a la place s'il est donne.
+function peindre(c, Q, couleur, op, trait){
   if(!Q.length || !(op > 0)) return;
-  c.fillStyle = couleur; c.globalAlpha = Math.min(1, op);
+  c.globalAlpha = Math.min(1, op);
   c.beginPath();
   for(var k = 0; k < Q.length; k += 4) c.rect(Q[k], Q[k + 1], Q[k + 2], Q[k + 3]);
-  c.fill();
+  if(trait){ c.strokeStyle = couleur; c.lineWidth = trait; c.stroke(); }
+  else { c.fillStyle = couleur; c.fill(); }
 }
 
 function dessine(C, rang, g, r){
@@ -429,7 +432,7 @@ function dessine(C, rang, g, r){
   var hTick = Math.abs(g.y(R.poc * t) - g.y((R.poc + 1) * t));
   var pas = r.rangee >= 1 ? r.rangee | 0 : Math.max(1, Math.ceil(RANGEE_PX * e / Math.max(hTick, 1e-9)));
   var col = Math.abs(g.x(g.premiere + 1) - g.x(g.premiere));
-  var Q = {hors:[], va:[], poc:[], achat:[], vente:[]}, LP = [], LV = [], x0, x1;
+  var Q = {hors:[], va:[], poc:[], achat:[], vente:[], achatH:[], venteH:[], cadre:[]}, LP = [], LV = [], x0, x1;
   for(k = 0; k < tous.length; k++){
     R = tous[k];
     var xa = g.x(R.deb) - col / 2, xb = g.x(R.fin) + col / 2, cour = R === X.cour;
@@ -445,7 +448,11 @@ function dessine(C, rang, g, r){
     LV.push([x0, yh], [x1, yh], [NaN, NaN], [x0, yl], [x1, yl], [NaN, NaN]);
   }
   var c = g.ctx;
-  if(r.mode === 'empile'){ peindre(c, Q.achat, r.achatC, r.achatO); peindre(c, Q.vente, r.venteC, r.venteO); }
+  if(r.mode === 'empile'){
+    peindre(c, Q.achat, r.achatC, r.achatO); peindre(c, Q.vente, r.venteC, r.venteO);
+    peindre(c, Q.achatH, r.achatC, r.achatO * r.horsVA); peindre(c, Q.venteH, r.venteC, r.venteO * r.horsVA);
+    peindre(c, Q.cadre, r.pocC, r.pocO, e);
+  }
   else { peindre(c, Q.hors, r.couleur, r.opac); peindre(c, Q.va, r.couleurVA, r.opacVA); peindre(c, Q.poc, r.pocC, r.pocO); }
   c.globalAlpha = 1;
   if(r.pocL) g.trait(LP, {couleur:r.pocLC, epaisseur:+r.pocLE || 1.5, pointille:POINTILLE[r.pocLT] || null, opacite:+r.pocLO});
@@ -485,6 +492,7 @@ function reglages(periode){
     {k:'achatO',   label:'Opacité acheteurs', type:'number', defaut:0.5, min:0, max:1, pas:0.05},
     {k:'venteC',   label:'Couleur vendeurs', type:'color', defaut:'#e0567f'},
     {k:'venteO',   label:'Opacité vendeurs', type:'number', defaut:0.5, min:0, max:1, pas:0.05},
+    {k:'horsVA',   label:'Opacité relative hors Value Area', type:'number', defaut:0.4, min:0, max:1, pas:0.05},
     {k:'couleur',  label:'Couleur hors Value Area', type:'color', defaut:'#6b7785'},
     {k:'opac',     label:'Opacité hors Value Area', type:'number', defaut:0.5, min:0, max:1, pas:0.05},
     {k:'couleurVA', label:'Couleur Value Area', type:'color', defaut:'#3d8bd4'},

@@ -30,8 +30,9 @@ const avec = o => Object.assign({}, defaut, o);
 const niveaux = b => { const lv = b && b.lv || []; return { n: lv.length, prix: k => lv[k][0], bid: k => lv[k][1] || 0, ask: k => lv[k][2] || 0,
   volume: () => lv.reduce((s, l) => s + (l[1] || 0) + (l[2] || 0), 0) }; };
 const rec = [];
-const ctx = { set fillStyle(c) { this._c = c; }, set globalAlpha(a) { this._a = a; }, beginPath() { this._p = []; },
-  rect(x, y, w, h) { this._p.push({ x, y, w, h }); }, fill() { for (const r of this._p) rec.push(Object.assign({ k: 'rect', c: this._c, a: this._a }, r)); } };
+const ctx = { set fillStyle(c) { this._c = c; }, set strokeStyle(c) { this._s = c; }, set lineWidth(l) { this._l = l; }, set globalAlpha(a) { this._a = a; }, beginPath() { this._p = []; },
+  rect(x, y, w, h) { this._p.push({ x, y, w, h }); }, fill() { for (const r of this._p) rec.push(Object.assign({ k: 'rect', c: this._c, a: this._a }, r)); },
+  stroke() { for (const r of this._p) rec.push(Object.assign({ k: 'cadre', c: this._s, a: this._a, l: this._l }, r)); } };
 let syms = 0;
 // Each call gets its own symbol unless one is given, so caches never leak between checks. One bar per pixel.
 const g = (B = bars, o = {}) => Object.assign({ n: B.length, premiere: B.length - 300, derniere: B.length - 1, tick: 0.25, seance: 'eth', sym: 'T' + syms++, tf: 1, echelle: 1,
@@ -86,8 +87,10 @@ const sem = d => E.outils.semaine(d);
     egal(R, reference(S.flatMap(s => s.bars)), T + ' : ' + S.length + ' séances');
     assert.equal(R.partiel, partiel(T, S), T + ' : partiel');
     assert.equal(R.cle, T === 'sem' ? sem(last.date).slice(5) : last.date.slice(0, 7));
+    // The last three previous periods, whatever the archive spans, but the partial first one.
     const avant = db.sessions.filter(s => cle(s.date) < cle(last.date)), prec = complet(g(bars, { premiere: 0 }), avec({ periode: T, hist: 3 })).prec;
-    if (avant.length && partiel(T, avant)) assert.equal(prec.length, 0, T + ' précédent partiel omis');
+    const attendu = [...new Set(avant.map(s => cle(s.date)))].slice(-3).filter(c => !(c === cle(avant[0]?.date) && partiel(T, avant)));
+    assert.deepEqual(prec.map(R => R.cle), attendu.map(c => T === 'sem' ? c.slice(5) : c), T + ' : précédents, partiel omis');
   }
 }
 
@@ -97,13 +100,17 @@ const sem = d => E.outils.semaine(d);
   egal(cour(g(bars, { seance: 'rth' }), avec({ rth: true })), reference(last.bars), 'graphe RTH : pas de filtre');
 }
 
-// 5. US, Europe and Asia sessions with the built-in hours: RTH is m ∈ [930, 1320), Europe [540, 930),
-// Asia [0, 540) on an ETH chart opened at 18:00 ET; the three cover the session but its last hour.
+// 5. US, Europe and Asia sessions with the built-in hours: RTH is m ∈ [930, 1320) on an ETH chart opened
+// at 18:00 ET, Asia runs from the open to Europe, which starts at 08:00 London and so moves against ET
+// between the two DST switches; the three cover the session but its last hour.
 {
   assert.deepEqual([...E.outils.bornesET('us', '2026-10-14')], [570, 960], 'RTH 09:30 → 16:00 ET');
   assert.deepEqual([...E.outils.bornesET('eu', '2026-10-14')], [180, 570], 'Europe 03:00 → 09:30 ET');
   assert.deepEqual([...E.outils.bornesET('asie', '2026-10-14')], [1080, 180], 'Asie 18:00 → 03:00 ET');
-  const fen = { us: entre(930, 1320), eu: entre(540, 930), asie: entre(0, 540) }, total = {};
+  assert.deepEqual([...E.outils.bornesET('eu', '2026-10-26')], [240, 570], 'Europe 04:00 ET, Londres à l\'heure d\'hiver avant New York');
+  // Windows of the last session's date, in chart minutes.
+  const fenDe = T => { const [a, b] = E.outils.bornesET(T, last.date).map(v => (v - 1080 + 1440) % 1440); return entre(a, b <= a ? b + 1440 : b); };
+  const fen = { us: fenDe('us'), eu: fenDe('eu'), asie: fenDe('asie') }, total = {};
   for (const T of Object.keys(fen)) {
     const R = cour(g(), avec({ periode: T }));
     egal(R, reference(last.bars, fen[T]), T);
@@ -112,13 +119,14 @@ const sem = d => E.outils.semaine(d);
     for (const [t, e] of Object.entries(plat(R))) { const s = total[t] ||= [0, 0]; s[0] += e[0]; s[1] += e[1]; }
   }
   assert.deepEqual(total, reference(last.bars, m => m < 1320), 'Asie + Europe + US = séance sans sa dernière heure');
-  // Previous sessions keep their own window.
+  // Previous sessions keep their own window; a recording cut before 09:30 has no RTH.
   const prec = complet(g(bars, { premiere: 0 }), avec({ periode: 'us', hist: 9 })).prec;
-  assert.equal(prec.length, db.sessions.length - 1, 'une RTH par séance précédente');
-  prec.forEach((R, k) => egal(R, reference(db.sessions[k].bars, fen.us), 'RTH du ' + db.sessions[k].date));
+  const avecRTH = db.sessions.slice(0, -1).filter(s => s.bars.some(b => fen.us(b.m)));
+  assert.equal(prec.length, avecRTH.length, 'une RTH par séance précédente qui en a');
+  prec.forEach((R, k) => egal(R, reference(avecRTH[k].bars, fen.us), 'RTH du ' + avecRTH[k].date));
   // Before 09:30 the last US session is the previous one; Europe is already today's.
   const tot = bars.slice(0, iLast + last.bars.findIndex(b => b.m >= 900));
-  assert.equal(cour(g(tot), avec({ periode: 'us' })).cle, db.sessions[db.sessions.length - 2].date, 'avant 09:30 : RTH de la veille');
+  assert.equal(cour(g(tot), avec({ periode: 'us' })).cle, avecRTH.at(-1).date, 'avant 09:30 : RTH de la veille');
   assert.equal(cour(g(tot), avec({ periode: 'eu' })).cle, last.date, 'Europe du jour');
   // TT's world sessions win over the defaults: US moved to 10:00-11:00 ET.
   const D = charger({ HFQSessionsMonde: { bornes: () => [{ id: 'us', debut: 36000, fin: 39600 }] } })[0];
@@ -196,16 +204,25 @@ const synth = (dates, m0 = 0) => dates.flatMap((date, s) => [0, 1, 2].map(k => {
 const POINTS = { plein: null, tirets: [6, 4], points: [2, 3] };
 {
   const B = synth(jours('2026-10-12', '2026-10-14')), G = g(B, { premiere: 0 });
-  const dessin = (r, G2 = G, D = E) => { rec.length = 0; D.dessine(G2, r); return { rects: rec.filter(x => x.k === 'rect'), traits: rec.filter(x => x.k === 'trait'), textes: rec.filter(x => x.k === 'texte') }; };
+  const dessin = (r, G2 = G, D = E) => { rec.length = 0; D.dessine(G2, r); return { rects: rec.filter(x => x.k === 'rect'), cadres: rec.filter(x => x.k === 'cadre'), traits: rec.filter(x => x.k === 'trait'), textes: rec.filter(x => x.k === 'texte') }; };
   const proche = (a, b) => Math.abs(a - b) < 1e-9;
 
   // Stacked at the right edge: buyers against the edge, sellers beyond; the fullest row takes 25 %.
+  // Outside the value area both fade to `horsVA` of their opacity; the POC row is outlined.
   let r = avec({ rangee: 1, periode: 'sem' }), R = cour(G, r), D = dessin(r);
   const achat = D.rects.filter(x => x.c === r.achatC), vente = D.rects.filter(x => x.c === r.venteC);
+  const tickDe = x => Math.round(x.y / 0.25 + 0.5), dansVA = x => tickDe(x) >= R.val && tickDe(x) <= R.vah;
   assert.equal(achat.length, R.ticks.length, 'une rangée par tick');
-  assert.ok(achat.every(x => proche(x.x + x.w, 1000) && x.a === r.achatO), 'acheteurs contre le bord droit');
-  assert.ok(vente.every(x => x.a === r.venteO && proche(x.x + x.w, achat.find(y => y.y === x.y).x)), 'vendeurs au bout');
+  assert.ok(achat.every(x => proche(x.x + x.w, 1000)), 'acheteurs contre le bord droit');
+  assert.ok(vente.every(x => proche(x.x + x.w, achat.find(y => y.y === x.y).x)), 'vendeurs au bout');
+  assert.ok(achat.some(x => !dansVA(x)), 'des rangées hors VA');
+  assert.ok(achat.every(x => proche(x.a, dansVA(x) ? r.achatO : r.achatO * r.horsVA)), 'acheteurs atténués hors VA');
+  assert.ok(vente.every(x => proche(x.a, dansVA(x) ? r.venteO : r.venteO * r.horsVA)), 'vendeurs atténués hors VA');
   const k0 = R.ticks.indexOf(R.poc), rangeeDe = t => achat.find(x => proche(x.y, (t - 0.5) * 0.25));
+  assert.equal(D.cadres.length, 1, 'un seul cadre');
+  assert.deepEqual([D.cadres[0].c, D.cadres[0].a, D.cadres[0].l, tickDe(D.cadres[0])], [r.pocC, r.pocO, 1, R.poc], 'rangée du POC cerclée');
+  assert.ok(proche(D.cadres[0].x, rangeeDe(R.poc).x - vente.find(y => y.y === rangeeDe(R.poc).y).w) && proche(D.cadres[0].x + D.cadres[0].w, 1000), 'cadre sur toute la rangée');
+  assert.ok(dessin(avec({ rangee: 1, periode: 'sem', horsVA: 1 })).rects.every(x => x.a === (x.c === r.achatC ? r.achatO : r.venteO)), 'horsVA 1 : pas d\'atténuation');
   assert.ok(proche(rangeeDe(R.poc).w, 250 * R.ask[k0] / Math.max(...R.ticks.map((t, k) => R.bid[k] + R.ask[k]))), 'largeur des acheteurs');
   assert.ok(proche(Math.max(...achat.map(x => x.w + vente.find(y => y.y === x.y).w)), 250), '25 % de la largeur du cadre');
 
@@ -217,6 +234,7 @@ const POINTS = { plein: null, tirets: [6, 4], points: [2, 3] };
   const hors = R.ticks.find(t => t > R.vah || t < R.val);
   assert.deepEqual([deTick(hors).c, deTick(hors).a], [r.couleur, r.opac], 'rangée hors VA');
   assert.ok(D.rects.every(x => proche(x.x + x.w, 1000)), 'collées au bord droit');
+  assert.deepEqual(D.cadres, [], 'pas de cadre en mode total');
 
   // Lines from the start of the week to the right edge, styles from the settings; prices above them on the left.
   r = avec({ periode: 'sem', vaLT: 'points', vaLO: 0.4, pocLE: 3 }); D = dessin(r);
