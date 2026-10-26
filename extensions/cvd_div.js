@@ -1,7 +1,7 @@
 // Divergences CVD : UE / UA / DE / DA, sur le prix et dans un volet CVD.
 // Deux etudes, un seul calcul partage et mis en cache. Les reglages de
 // detection, les filtres et les couleurs vivent sur l'etude « prix » ;
-// le volet CVD les relit via HFQExt.inventaire() et ne garde que l'affichage.
+// le volet CVD les relit via HFQExt.etudes() et ne garde que l'affichage.
 //
 // Un pivot prix n'est retenu que si un pivot CVD de meme sens tombe a
 // `tol` barres pres (les deux moteurs d'accord). Chaque pivot B est compare
@@ -396,13 +396,15 @@ function calcCache(g, r){
   return CACHE.S;
 }
 
-// Les reglages partages tels que l'etude prix les tient, meme si elle est masquee.
+// Les reglages partages tels que l'etude prix les tient, meme si elle est
+// masquee. HFQExt.etudes(), la liste du panneau, ne lit que les reglages
+// demandes (1 ms) ; inventaire() relit ceux de toutes les etudes chargees
+// (20 a 30 ms avec 24 etudes), ce qui suspendait le volet.
 function partages(){
   try{
-    var inv = HFQExt.inventaire(), e = null, out = {}, i;
-    for(i = 0; i < inv.etudes.length; i++) if(inv.etudes[i].id === 'cvddiv-prix') e = inv.etudes[i];
-    if(e){
-      for(i = 0; i < e.reglages.length; i++) out[e.reglages[i].cle] = e.reglages[i].valeur;
+    var L = HFQExt.etudes(), out = {}, i, k;
+    for(i = 0; i < L.length; i++) if(L[i].id === 'ext:cvddiv-prix'){
+      for(k = 0; k < L[i].params.length; k++) out[L[i].params[k].k] = L[i].params[k].get();
       return out;
     }
   }catch(_){}
@@ -639,21 +641,28 @@ HFQExt.etude({
     if(r.style === 'bougies' && c){
       var pas = (S.idx.length > 1) ? Math.abs(g.x(S.idx[1]) - g.x(S.idx[0])) : 4 * e;
       var w = Math.max(1, pas * 0.62), lw = Math.max(1, e);
-      var M = r.meches ? meches(g, S, d0, t0) : {};
-      c.save();
+      // Un seul remplissage par couleur : un fillRect par bougie et par meche
+      // depassait le budget de TT des quelques milliers de barres visibles.
+      var M = r.meches ? meches(g, S, d0, t0) : {}, Q = {haut:[], bas:[]};
       for(i = d0; i < S.idx.length; i++){
         var ouv = (i > 0 && S.sk[i] === S.sk[i-1]) ? S.cv[i-1] : S.cv[i] - S.dl[i];
         var clo = S.cv[i], x = g.x(S.idx[i]);
         var y1 = g.y(ouv), y2 = g.y(clo);
         var hb = Math.abs(y2 - y1);
         if(hb < 1) hb = 1;
-        c.fillStyle = (clo >= ouv) ? r.cup : r.cdn;
+        var R = (clo >= ouv) ? Q.haut : Q.bas;
         if(M[i]){
           var yh = g.y(ouv + M[i].h), yl = g.y(ouv + M[i].l);
-          c.fillRect(x - lw / 2, Math.min(yh, yl), lw, Math.abs(yl - yh));
+          R.push(x - lw / 2, Math.min(yh, yl), lw, Math.abs(yl - yh));
         }
-        c.fillRect(x - w / 2, Math.min(y1, y2), w, hb);
+        R.push(x - w / 2, Math.min(y1, y2), w, hb);
       }
+      c.save();
+      [[Q.haut, r.cup], [Q.bas, r.cdn]].forEach(function(q){
+        c.fillStyle = q[1]; c.beginPath();
+        for(var k = 0; k < q[0].length; k += 4) c.rect(q[0][k], q[0][k + 1], q[0][k + 2], q[0][k + 3]);
+        c.fill();
+      });
       c.restore();
     } else {
       var pts = [];

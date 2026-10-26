@@ -21,7 +21,7 @@
 // premiere des N barres suivantes qui clot au-dela de l'extreme oppose de la
 // barre d'absorption avec un delta franc ou des desequilibres empiles dans
 // le sens de la reprise. Elle relit les reglages de detection de l'etude
-// absorption par HFQExt.inventaire().
+// absorption par HFQExt.etudes().
 //
 // Barres closes seulement : la barre en formation n'est jamais jugee, donc
 // rien ne se repeint ni ne sonne deux fois. Un seul calcul incremental,
@@ -463,8 +463,10 @@ var defAbs = {
 };
 
 // Les reglages de detection tels que l'etude absorption les tient, meme
-// masquee. ponytail: inventaire() relit tous les reglages de toutes les
-// etudes, on ne l'interroge qu'une fois toutes les 300 ms.
+// masquee, par HFQExt.etudes() qui ne lit que ceux qu'on demande : inventaire()
+// relisait ceux de toutes les etudes chargees (20 a 30 ms avec 24 etudes), et
+// toutes les 300 ms, une image sur deux quand TT redessine moins souvent.
+// ponytail: relu au plus toutes les 300 ms, alors que la lecture ne coute plus que 1 ms.
 var DEFAUTS = {}, PART = {t:-Infinity, r:null};
 defAbs.reglages.forEach(function(x){ DEFAUTS[x.k] = x.defaut; });
 function partages(){
@@ -472,10 +474,10 @@ function partages(){
   if(PART.r && t - PART.t < 300) return PART.r;
   var out = DEFAUTS;
   try{
-    var inv = HFQExt.inventaire();
-    for(var i = 0; i < inv.etudes.length; i++) if(inv.etudes[i].id === 'absorption'){
+    var L = HFQExt.etudes();
+    for(var i = 0; i < L.length; i++) if(L[i].id === 'ext:absorption'){
       out = {};
-      inv.etudes[i].reglages.forEach(function(x){ out[x.cle] = x.valeur; });
+      L[i].params.forEach(function(x){ out[x.k] = x.get(); });
     }
   }catch(_){}
   PART.t = t; PART.r = out;

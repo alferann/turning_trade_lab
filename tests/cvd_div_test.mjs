@@ -26,9 +26,9 @@ function charger() {
   const HFQExt = {
     etude(d) { defs.push(d); return true; },
     redessiner() { demandes++; },
-    inventaire() {
+    etudes() {
       const p = defs.find(d => d.id === 'cvddiv-prix');
-      return { etudes: [{ id: 'cvddiv-prix', reglages: p.reglages.map(x => ({ cle: x.k, valeur: x.k in surch ? surch[x.k] : x.defaut })) }] };
+      return [{ id: 'ext:cvddiv-prix', params: p.reglages.map(x => ({ k: x.k, get: () => x.k in surch ? surch[x.k] : x.defaut })) }];
     }
   };
   // No HFQNotify in Turning Trade 0.4.6: the study falls back to desktop notifications.
@@ -120,6 +120,8 @@ assert.ok(signaux(prix, { conf: 'pivot', tol: 0 }).length < conf.length, 'tolér
 const pane = signaux(cvd, { conf: 'pivot' });
 assert.equal(pane.length, conf.length, 'mêmes signaux dans le volet');
 assert.ok(pane.every((s, i) => s.t === conf[i].t && s.n === conf[i].n), 'mêmes types et niveaux');
+// A non-default setting of the price study reaches the pane (fewer signals with tolerance 0).
+assert.equal(signaux(cvd, { conf: 'pivot', tol: 0 }).length, signaux(prix, { conf: 'pivot', tol: 0 }).length, 'tolérance lue sur l\'étude prix');
 
 // 8. Pre-shot zone: price comes back within preZ ticks of the last retained high while CVD
 //    sits far below it. Expected: one label 'UE pré-tir'. Off by setting, gone out of range.
@@ -169,18 +171,22 @@ function ruban(cs, sz, sd) {
 // Canvas stub recording fillRect; x = 10 px per bar so a 1 px wick never looks like a 6.2 px body.
 function toile() {
   let fs = null; const rects = [];
-  const t = { rects, fillRect(x, y, w, h) { rects.push({ x, y, w, h, fs }); }, get fillStyle() { return fs; }, set fillStyle(v) { fs = v; } };
+  let chemin = [];
+  const t = { rects, fillRect(x, y, w, h) { rects.push({ x, y, w, h, fs }); }, get fillStyle() { return fs; }, set fillStyle(v) { fs = v; },
+    beginPath() { chemin = []; }, rect(x, y, w, h) { chemin.push({ x, y, w, h }); }, fill() { for (const q of chemin) { q.fs = fs; rects.push(q); } } };
   return new Proxy(t, { get: (o, k) => k in o ? o[k] : () => {} });
 }
-// Draws frames until the study stops asking for a redraw; `images` and `pire` (worst frame, ms) are kept.
-let images, pire;
+// Draws frames until the study stops asking for a redraw; `images`, `pire` (worst frame, ms) and `suspendue`
+// (three frames in a row over 8 ms, TT's suspension rule, so a lone GC pause does not count) are kept.
+let images, pire, suspendue;
 function meches(B, P, r = {}, premiere = 0) {
-  let M;
-  for (images = 0, pire = 0, demandes = 1; demandes; images++) {
+  let M, lents = 0;
+  for (images = 0, pire = 0, suspendue = false, demandes = 1; demandes; images++) {
     assert.ok(images < 50, 'rattrapage fini');
     demandes = 0;
     const c = toile(), G = Object.assign(g(B, premiere, B.length - 1, []), { ctx: c, x: i => i * 10, prints: P });
-    const t = performance.now(); cvd.dessine(G, Object.assign(defaut(cvd), r)); pire = Math.max(pire, performance.now() - t);
+    const t = performance.now(); cvd.dessine(G, Object.assign(defaut(cvd), r)); const ms = performance.now() - t;
+    pire = Math.max(pire, ms); lents = ms > 8 ? lents + 1 : 0; suspendue ||= lents >= 3;
     M = Object.fromEntries(c.rects.filter(q => q.w === 1).map(q => [Math.round(q.x / 10), [q.y, q.y + q.h]]));
   }
   return M;
@@ -243,10 +249,10 @@ function tapeReelle(sym, date) {
   if (R2) {
     const B = db.sessions.find(s => s.date === date2).bars.map(b => Object.assign({ _date: date2 }, b)), P = ruban(R2.cs, R2.sz, R2.sd);
     ({ prix, cvd } = charger()); surch = {};
-    // Each catch-up frame under 8 ms, then warm frames.
-    const M = meches(B, P), n = images, froid = pire;
+    // Catch-up frames, then warm frames, never three in a row over 8 ms.
+    const M = meches(B, P), n = images, froid = pire, suspFroid = suspendue;
     meches(B, P); const chaud = pire;
-    assert.ok(n > 1 && froid < 8 && chaud < 8, 'budget mèches 8 ms, pire image ' + froid.toFixed(2) + ' chaud ' + chaud.toFixed(2));
+    assert.ok(n > 1 && !suspFroid && !suspendue, 'budget mèches 8 ms, pire image ' + froid.toFixed(2) + ' chaud ' + chaud.toFixed(2));
     ({ prix, cvd } = charger()); surch = {};
     const fin = meches(B, P, {}, B.length - 30);
     // The CVD starts at the window start, so a shifted window shifts the wicks: compare their spans.

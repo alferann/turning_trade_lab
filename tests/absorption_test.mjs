@@ -21,15 +21,15 @@ const J = e => {
 };
 const SANS_TAPE = { n: 0, t: () => 0, prix: () => 0, taille: () => 0, achat: () => false, avant: () => -1 };
 
-// Loads the file in a fresh context; inventaire() serves the absorption settings with `surch` on top.
+// Loads the file in a fresh context; etudes() serves the absorption settings with `surch` on top.
 let defs, pushes, surch = {};
 function charger() {
   defs = []; pushes = []; surch = {};
   const HFQExt = {
     etude(d) { defs.push(d); return true; },
-    inventaire() {
+    etudes() {
       const a = defs.find(d => d.id === 'absorption');
-      return { etudes: [{ id: 'absorption', reglages: a.reglages.map(x => ({ cle: x.k, valeur: x.k in surch ? surch[x.k] : x.defaut })) }] };
+      return [{ id: 'ext:absorption', params: a.reglages.map(x => ({ k: x.k, get: () => x.k in surch ? surch[x.k] : x.defaut })) }];
     }
   };
   class Notification { constructor(titre, o) { pushes.push({ titre, texte: o && o.body }); } }
