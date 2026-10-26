@@ -28,7 +28,7 @@ var BUDGET_MS = 4;
 // `n` barres closes lues, `vu` taille du graphe au dernier passage, `j` index
 // de seance du graphe de la derniere barre close, `cour` la session en cours,
 // `D` la derniere session close de chaque id, `pret` l'historique rattrape.
-var ETAT = {sig:'', n:0, vu:0, j:0, prev:null, F:{}, cour:null, D:{}, pret:false, neufs:[]};
+var ETAT = {sig:'', n:0, vu:0, j:0, prev:null, ip:-1, F:{}, cour:null, D:{}, pret:false, neufs:[]};
 
 // Anglais : nom, description, reglages, options et textes du canevas.
 var DESC = 'Haut et bas de la dernière session close de Tokyo, Londres, New York et de la clôture, selon les sessions du monde de TT, prolongés jusqu\'au premier toucher, à la première clôture au-delà ou au bord droit, notification au choix.';
@@ -66,6 +66,8 @@ try{
 }catch(_){}
 
 function aujourdhui(){ return new Date().toISOString().slice(0, 10); }
+// Cle d'une barre, pour reconnaitre la derniere lue a son index.
+function cleBarre(b){ return b ? (b._date || '') + ':' + b.m : ''; }
 function maintenant(){ return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now(); }
 function redessiner(){
   try{ if(typeof setTimeout !== 'undefined' && HFQExt.redessiner) setTimeout(function(){ HFQExt.redessiner(); }, 0); }catch(_){}
@@ -145,13 +147,15 @@ function lit(S, b, i, j, vive, ouv, demi){
 }
 
 // Incremental : les barres closes ne se lisent qu'une fois, la derniere se
-// relit a chaque passage. Un graphe qui raccourcit (replay ramene en arriere)
-// ou une autre serie repart de zero, sans notifier l'historique, dont la
-// lecture s'etale sur plusieurs images au-dela de BUDGET_MS.
+// relit a chaque passage. Un graphe qui raccourcit (replay ramene en arriere),
+// une autre serie ou une derniere barre lue qui n'est plus a son index (barres
+// inserees plus tot, comme l'historique en ticks qui se remplit) repart de
+// zero, sans notifier l'historique, dont la lecture s'etale sur plusieurs
+// images au-dela de BUDGET_MS.
 function calcul(g, r){
   var S = ETAT, n = g.n | 0, b0 = n ? g.barre(0) : null, b;
-  var sig = [g.sym, g.tf, g.seance, g.tick, b0 ? (b0._date || '') + ':' + b0.m : ''].join('|');
-  if(sig !== S.sig || n < S.vu){ S.sig = sig; S.n = 0; S.j = 0; S.prev = null; S.F = {}; S.cour = null; S.D = {}; S.pret = false; S.neufs = []; }
+  var sig = [g.sym, g.tf, g.seance, g.tick, cleBarre(b0)].join('|');
+  if(sig !== S.sig || n < S.vu || (S.prev && cleBarre(g.barre(S.ip)) !== cleBarre(S.prev))){ S.sig = sig; S.n = 0; S.j = 0; S.prev = null; S.ip = -1; S.F = {}; S.cour = null; S.D = {}; S.pret = false; S.neufs = []; }
   S.vu = n;
   var ouv = OUVERTURE[g.seance] != null ? OUVERTURE[g.seance] : 1080;
   // Milieu de la barre sur les unites de temps en minutes, comme les bandes de TT.
@@ -161,7 +165,7 @@ function calcul(g, r){
     if(!(b = g.barre(i))) continue;
     var j = S.j + (S.prev && (b._date != null ? b._date !== S.prev._date : +b.m < +S.prev.m) ? 1 : 0);
     lit(S, b, i, j, i === n - 1, ouv, demi);
-    S.j = j; S.prev = b;
+    S.j = j; S.prev = b; S.ip = i;
   }
   S.n = Math.max(S.n, n - 1); S.pret = true;
   return S;

@@ -154,12 +154,14 @@ function semaine(cle){
 }
 
 function aujourdhui(){ return new Date().toISOString().slice(0, 10); }
+// Cle d'une barre, pour reconnaitre la derniere lue a son index.
+function cleBarre(b){ return b ? (b._date || '') + ':' + b.m : ''; }
 function maintenant(){ return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now(); }
 function redessiner(){
   try{ if(typeof setTimeout !== 'undefined' && HFQExt.redessiner) setTimeout(function(){ HFQExt.redessiner(); }, 0); }catch(_){}
 }
 
-function cache(){ return {sig:'', id0:'', n:0, fen:{}, cle:[], sessAt:new Int32Array(0), V:new Float64Array(0), PV:new Float64Array(0), PV2:new Float64Array(0), vwap:new Float64Array(0), sd:new Float64Array(0)}; }
+function cache(){ return {sig:'', id0:'', der:'', n:0, fen:{}, cle:[], sessAt:new Int32Array(0), V:new Float64Array(0), PV:new Float64Array(0), PV2:new Float64Array(0), vwap:new Float64Array(0), sd:new Float64Array(0)}; }
 
 function agrandir(C, n){
   if(C.V.length >= n) return;
@@ -170,14 +172,16 @@ function agrandir(C, n){
 
 // Sommes cumulees par ancrage, barre par barre. Incremental : si le graphe a
 // seulement grandi depuis le dernier appel, seules la derniere barre connue
-// (qui a pu grossir) et les nouvelles sont recalculees. Passee l'echeance
-// `fin`, la lecture s'arrete et C.n dit jusqu'ou elle est allee : l'appel
-// suivant reprend la, par le meme chemin incremental.
+// (qui a pu grossir) et les nouvelles sont recalculees. Si cette barre n'est
+// plus a son index (barres inserees plus tot, comme l'historique en ticks qui
+// se remplit), tout repart de zero. Passee l'echeance `fin`, la lecture
+// s'arrete et C.n dit jusqu'ou elle est allee : l'appel suivant reprend la,
+// par le meme chemin incremental.
 function calcul(C, g, r, fin){
   var n = g.n | 0, b0 = n ? g.barre(0) : null;
   var sig = [g.sym, g.tf, g.seance, r.anc, r.deb, r.fin, r.tz, r.src].join('|');
-  var id0 = b0 ? (b0._date || '') + ':' + b0.m : '';
-  var depuis = (C.sig === sig && C.id0 === id0 && n >= C.n && C.n > 0) ? C.n - 1 : 0;
+  var id0 = cleBarre(b0);
+  var depuis = (C.sig === sig && C.id0 === id0 && n >= C.n && C.n > 0 && cleBarre(g.barre(C.n - 1)) === C.der) ? C.n - 1 : 0;
   if(!depuis) C.fen = {};
   agrandir(C, n);
   var ouv = OUVERTURE[g.seance] != null ? OUVERTURE[g.seance] : 1080;
@@ -219,7 +223,7 @@ function calcul(C, g, r, fin){
     } else { C.vwap[i] = NaN; C.sd[i] = NaN; }
     prev = b;
   }
-  C.n = i; C.sig = sig; C.id0 = id0;
+  C.n = i; C.sig = sig; C.id0 = id0; C.der = cleBarre(g.barre(i - 1));
   return C;
 }
 

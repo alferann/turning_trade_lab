@@ -37,6 +37,9 @@ const dessine = (G, r) => { A.calcul(G, r); rec.length = 0; A.dessine(G, r); };
 // Brute-force VWAP and σ from the per-price volume of a set of bars.
 const brute = bs => { let sv = 0, spv = 0, spv2 = 0; for (const b of bs) for (const [p, bid, ask] of b.lv) { const v = bid + ask; sv += v; spv += p * v; spv2 += p * p * v; } const vwap = spv / sv; return { vwap, sd: Math.sqrt(spv2 / sv - vwap * vwap) }; };
 const cur = db.sessions[db.sessions.length - 1], iCur = N - cur.bars.length;
+// The last session that reaches 16:00 ET, for the session windows: the archive may end in the Asian session.
+const plein = db.sessions.findLast(s => s.bars.some(b => b.m >= 1320)), iPlein = bars.findIndex(b => b._date === plein.date);
+const NP = iPlein + plein.bars.length, BP = bars.slice(0, NP);
 const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a + ' vs ' + b);
 
 // 1. Daily anchor: the last bar carries the VWAP of the whole current session; the first bar of the session restarts the sums.
@@ -61,14 +64,14 @@ const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a 
 // at 08:00 London and so moves against ET between the two DST switches; outside, nothing.
 {
   const fen = Object.fromEntries(['us', 'eu', 'asie'].map(anc => {
-    const [a, b] = A.outils.bornesET(anc, cur.date, defaut).map(v => (v - 1080 + 1440) % 1440);
+    const [a, b] = A.outils.bornesET(anc, plein.date, defaut).map(v => (v - 1080 + 1440) % 1440);
     return [anc, [a, b <= a ? b + 1440 : b]];
   }));
   assert.deepEqual(fen.us, [930, 1320], 'RTH en minutes de séance');
   for (const anc of Object.keys(fen)) {
-    const C = A.calcul(g(), avec({ anc }));
+    const C = A.calcul(g(BP), avec({ anc }));
     const dedans = [], dehors = [];
-    for (let i = iCur; i < N; i++) (bars[i].m >= fen[anc][0] && bars[i].m < fen[anc][1] ? dedans : dehors).push(i);
+    for (let i = iPlein; i < NP; i++) (bars[i].m >= fen[anc][0] && bars[i].m < fen[anc][1] ? dedans : dehors).push(i);
     assert.ok(dehors.every(i => Number.isNaN(C.vwap[i])), anc + ' : rien hors séance');
     assert.ok(dedans.every(i => Number.isFinite(C.vwap[i])), anc + ' : une valeur par barre de séance');
     const fin = dedans[dedans.length - 1], B = brute(dedans.map(i => bars[i]));
@@ -79,10 +82,10 @@ const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a 
 
 // 4. Forced hours in another zone: 09:30 Chicago = 10:30 New York = m 990, until 16:00 ET.
 {
-  const C = A.calcul(g(), avec({ anc: 'us', deb: '570', tz: 'America/Chicago' }));
-  const premier = bars.findIndex((b, i) => i >= iCur && Number.isFinite(C.vwap[i]));
+  const C = A.calcul(g(BP), avec({ anc: 'us', deb: '570', tz: 'America/Chicago' }));
+  const premier = BP.findIndex((b, i) => i >= iPlein && Number.isFinite(C.vwap[i]));
   assert.equal(bars[premier].m, 990, 'début forcé 09:30 Chicago');
-  assert.ok(Number.isNaN(C.vwap[bars.findIndex((b, i) => i >= iCur && b.m === 1320)]), 'fin auto à 16:00 ET');
+  assert.ok(Number.isNaN(C.vwap[BP.findIndex((b, i) => i >= iPlein && b.m === 1320)]), 'fin auto à 16:00 ET');
 }
 
 // 5. Weekly and monthly: the loaded sessions of the last one's ISO week and month, carried over each session open.
@@ -102,6 +105,17 @@ const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a 
   assert.equal(C2.n, N);
   proche(C2.vwap[N - 1], brute(cur.bars).vwap, 'extension d\'une barre');
   proche(C2.vwap[N - 2], brute(cur.bars.slice(0, -1)).vwap, 'barre précédente intacte');
+}
+
+// 6b. Bars inserted before the last one read (tick history filling a missing day): the cache starts over
+// and gives what a fresh computation gives, whatever the anchor.
+{
+  const trou = bars.filter(b => b._date !== db.sessions[1].date), sur = (B, sym) => Object.assign(g(B), { sym });
+  for (const anc of ['jour', 'us', 'sem']) {
+    A.calcul(sur(trou, 'INS'), avec({ anc }));
+    const ins = Array.from(A.calcul(sur(bars, 'INS'), avec({ anc })).vwap.subarray(0, N));
+    assert.deepEqual(ins, Array.from(defs[1].calcul(sur(bars, 'NEUF'), avec({ anc })).vwap.subarray(0, N)), anc + ' : insertion = calcul complet');
+  }
 }
 
 // 7. Footprint-like bars without _date: sessions are split where m falls back.
