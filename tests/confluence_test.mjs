@@ -10,8 +10,12 @@ const SRC = fs.readFileSync(path.join(RACINE, 'extensions/confluence.js'), 'utf8
 const DB = path.join(process.env.TT_DATA || path.join(process.env.HOME, '.local/share/TurningTrade'), '_footprint_db_rec_ES.json');
 
 const db = JSON.parse(fs.readFileSync(DB, 'utf8'));
+// The archive grows live and holds cut recordings: the chart ends after the last session that reaches 16:00 ET
+// with a previous session that does too, so the RTH levels and the previous day exist.
+const complete = s => s && s.bars.some(b => b.m >= 1320);
+const sessions = db.sessions.slice(0, db.sessions.findLastIndex((s, k) => complete(s) && complete(db.sessions[k - 1])) + 1);
 const bars = [];
-for (const s of db.sessions) for (const b of s.bars) bars.push(Object.assign({ _date: s.date, v: b.lv.reduce((a, l) => a + l[1] + l[2], 0) }, b));
+for (const s of sessions) for (const b of s.bars) bars.push(Object.assign({ _date: s.date, v: b.lv.reduce((a, l) => a + l[1] + l[2], 0) }, b));
 const N = bars.length, tick = db.tick;
 const J = e => !e || !e.length ? { n: 0, prix: () => 0, bid: () => 0, ask: () => 0 }
   : { n: e.length, prix: k => e[k][0], bid: k => e[k][1] || 0, ask: k => e[k][2] || 0 };
@@ -27,7 +31,7 @@ const g = (B = bars, seance = 'eth') => ({ n: B.length, premiere: B.length - 300
 
 const R = def.calcul(g(), defaut);
 const niv = Object.fromEntries(R.niveaux.map(l => [l.nom, l.prix]));
-const cur = db.sessions[db.sessions.length - 1], veille = db.sessions[db.sessions.length - 2];
+const cur = sessions[sessions.length - 1], veille = sessions[sessions.length - 2];
 const rthCur = cur.bars.filter(b => b.m >= 930);
 const hist = (bs) => { const vol = new Map(); let sv = 0; for (const b of bs) for (const [p, bid, ask] of b.lv) { vol.set(p, (vol.get(p) || 0) + bid + ask); sv += bid + ask; } return { vol, sv }; };
 
@@ -45,9 +49,9 @@ const hist = (bs) => { const vol = new Map(); let sv = 0; for (const b of bs) fo
   const sem = d => { const x = new Date(d + 'T00:00:00Z'); const j = x.getUTCDay() || 7; x.setUTCDate(x.getUTCDate() + 4 - j); return x.getUTCFullYear() + '-' + Math.ceil(((x - Date.UTC(x.getUTCFullYear(), 0, 1)) / 864e5 + 1) / 7); };
   const semCur = sem(cur.date.slice(0, 10));
   let sv = 0, spv = 0;
-  for (const s of db.sessions) if (sem(s.date.slice(0, 10)) === semCur) for (const b of s.bars) for (const [p, bid, ask] of b.lv) { sv += bid + ask; spv += p * (bid + ask); }
+  for (const s of sessions) if (sem(s.date.slice(0, 10)) === semCur) for (const b of s.bars) for (const [p, bid, ask] of b.lv) { sv += bid + ask; spv += p * (bid + ask); }
   assert.ok(Math.abs(niv.wVWAP - spv / sv) < 1e-6, 'wVWAP');
-  const semaines = new Set(db.sessions.map(s => sem(s.date.slice(0, 10))));
+  const semaines = new Set(sessions.map(s => sem(s.date.slice(0, 10))));
   if (semaines.size > 1) assert.ok('wPP' in niv, 'pivots hebdo présents'); else assert.ok(!('wPP' in niv), 'pas de pivots hebdo sans semaine précédente');
 }
 
@@ -133,6 +137,17 @@ const hist = (bs) => { const vol = new Map(); let sv = 0; for (const b of bs) fo
 {
   const sans = def.calcul(g(), Object.assign({}, defaut, { vwap: false, vwapH: false, tpo: false, orMin: 0, ibMin: 0 }));
   assert.ok(!sans.niveaux.some(l => l.src === 'vwap' || l.src === 'tpo' || l.src === 'or'), 'sources désactivables');
+}
+
+// Bars inserted before the last one read (tick history filling a missing day, the previous one included):
+// the levels are those of a fresh computation, in a fresh context.
+{
+  const frais = () => { const d = []; vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(x) { d.push(x); return true; } }, console, Math, Date, String, Number, Object, Array, isNaN, isFinite, NaN, Infinity })); return d[0]; };
+  for (const s of [sessions[1], veille]) {
+    const T = frais();
+    T.calcul(g(bars.filter(b => b._date !== s.date)), defaut);
+    assert.deepEqual(JSON.parse(JSON.stringify(T.calcul(g(), defaut).niveaux)), JSON.parse(JSON.stringify(frais().calcul(g(), defaut).niveaux)), 'insertion de la séance ' + s.date);
+  }
 }
 
 // 10. Budget: cold compute on a fresh key, then cached.
