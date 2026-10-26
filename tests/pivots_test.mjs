@@ -1,5 +1,6 @@
 // Self-check for extensions/pivots.js: daily pivots on real ES bars baked by Turning Trade,
-// weekly and monthly on synthetic sessions (the archive holds a single week).
+// weekly, monthly and session completeness on synthetic sessions (the archive changes as TT
+// rewrites it, so nothing below depends on which days it holds).
 // Run: node tests/pivots_test.mjs   (from the repo root; TT_DATA overrides the data folder)
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -31,6 +32,15 @@ const g = (B = bars, seance = 'eth', premiere = B.length - 300) => ({ n: B.lengt
 const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a + ' vs ' + b);
 const hlc = bs => ({ H: Math.max(...bs.map(b => b.h)), L: Math.min(...bs.map(b => b.l)), C: bs[bs.length - 1].c, O: bs[0].o });
 const prix = niv => Object.fromEntries(niv.map(([n, p]) => [n, p]));
+// Same rule as the study on a one-minute ETH session: bars from the first hour to 4 h before 17:00 ET.
+const complete = bs => bs.length > 0 && bs[0].m <= 60 && bs[bs.length - 1].m >= 1380 - 240;
+const rthDe = s => s.bars.filter(b => b.m >= 930 && b.m < 1320);
+const completeRth = bs => bs.length > 0 && bs[0].m <= 930 + 60 && bs[bs.length - 1].m >= 1320 - 240;
+// Last archive session whose previous one covers its session (and its RTH window): the reference day below.
+const K = db.sessions.findLastIndex((s, k) => k > 0 && complete(db.sessions[k - 1].bars) && completeRth(rthDe(db.sessions[k - 1])));
+assert.ok(K > 0, 'une séance de l\'archive avec une veille complète');
+const finK = db.sessions.slice(0, K + 1).reduce((n, s) => n + s.bars.length, 0);
+const barsK = bars.slice(0, finK);
 
 // 1. Formulas, by hand for H 110, L 90, C 105, O 95.
 {
@@ -52,7 +62,8 @@ const prix = niv => Object.fromEntries(niv.map(([n, p]) => [n, p]));
   proche(prix(E.outils.niveaux('demark', 110, 90, 100, 100)).PP, (110 + 90 + 200) / 4, 'DeMark, clôture égale');
 }
 
-// 2. Daily on real ES bars: each session carries the pivots of the previous one, the first none.
+// 2. Daily on real ES bars: each session carries the pivots of the previous one if that one
+// covers its session, none otherwise; the first session has none.
 {
   const P = E.calcul(g(), defaut);
   assert.equal(P.jour.length, db.sessions.length, 'une période par séance');
@@ -62,21 +73,20 @@ const prix = niv => Object.fromEntries(niv.map(([n, p]) => [n, p]));
     assert.equal(P.jour[k].deb, i0, 'début de séance ' + s.date); i0 += s.bars.length;
     assert.equal(P.jour[k].fin, i0 - 1, 'fin de séance ' + s.date);
     if (!k) return;
+    if (!complete(db.sessions[k - 1].bars)) return assert.equal(P.jour[k].niv, null, 'veille incomplète, rien le ' + s.date);
     const v = hlc(db.sessions[k - 1].bars), R = prix(P.jour[k].niv);
     proche(R.PP, (v.H + v.L + v.C) / 3, 'PP ' + s.date);
     proche(R.R1, 2 * R.PP - v.L, 'R1 ' + s.date);
     proche(R.S3, v.L - 2 * (v.H - R.PP), 'S3 ' + s.date);
   });
-  // One week of data starting on a Tuesday: no complete week or month before it.
-  assert.ok(P.sem.every(p => !p.niv) && P.mois.every(p => !p.niv), 'semaine et mois incomplets : rien');
 }
 
 // 3. RTH only on an ETH chart: the previous session's 09:30-16:00 bars.
 {
   const P = E.calcul(g(), avec({ rth: true }));
-  const veille = db.sessions[db.sessions.length - 2].bars.filter(b => b.m >= 930 && b.m < 1320), v = hlc(veille);
-  proche(prix(P.jour[P.jour.length - 1].niv).PP, (v.H + v.L + v.C) / 3, 'PP sur RTH');
-  assert.notEqual(prix(P.jour[P.jour.length - 1].niv).PP, prix(E.calcul(g(), defaut).jour[P.jour.length - 1].niv).PP, 'RTH change le résultat');
+  const v = hlc(rthDe(db.sessions[K - 1]));
+  proche(prix(P.jour[K].niv).PP, (v.H + v.L + v.C) / 3, 'PP sur RTH');
+  assert.notEqual(prix(P.jour[K].niv).PP, prix(E.calcul(g(), defaut).jour[K].niv).PP, 'RTH change le résultat');
 }
 
 // 4. Footprint-like bars without _date: sessions split where m falls back, daily only.
@@ -84,13 +94,15 @@ const prix = niv => Object.fromEntries(niv.map(([n, p]) => [n, p]));
   const sans = bars.map(b => { const c = Object.assign({}, b); delete c._date; return c; });
   const P = E.calcul(g(sans), defaut);
   assert.equal(P.jour.length, db.sessions.length, 'séances retrouvées sans date');
-  proche(prix(P.jour[P.jour.length - 1].niv).PP, prix(E.calcul(g(), defaut).jour[P.jour.length - 1].niv).PP, 'même PP sans date');
+  proche(prix(P.jour[K].niv).PP, prix(E.calcul(g(), defaut).jour[K].niv).PP, 'même PP sans date');
   assert.equal(P.sem.length + P.mois.length, 0, 'ni semaine ni mois sans date');
 }
 
-// Synthetic weekday sessions of three one-minute bars, prices drifting with the session index.
+// Synthetic weekday sessions of three bars spread over the ETH session (18:00, 05:30, 16:59 ET), prices drifting with the session index.
 const jours = (de, a) => { const out = []; for (let d = new Date(de + 'T00:00:00Z'); d <= new Date(a + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1)) if (d.getUTCDay() % 6) out.push(d.toISOString().slice(0, 10)); return out; };
-const synth = dates => dates.flatMap((date, s) => [0, 1, 2].map(k => { const b = 100 + 3 * Math.sin(s) + k; return { _date: date, m: k, o: b, h: b + 2 + (s % 5), l: b - 1 - (s % 3), c: b + 1, v: 1, lv: [] }; }));
+const synth = dates => dates.flatMap((date, s) => [0, 690, 1379].map((m, k) => { const b = 100 + 3 * Math.sin(s) + k; return { _date: date, m, o: b, h: b + 2 + (s % 5), l: b - 1 - (s % 3), c: b + 1, v: 1, lv: [] }; }));
+// Synthetic one-minute ETH sessions, 1380 bars each, every session at its own price level.
+const minutes = dates => dates.flatMap((date, s) => Array.from({ length: 1380 }, (_, m) => { const b = 7000 + 15 * s + 20 * Math.sin(s + m / 200); return { _date: date, m, o: b, h: b + 1, l: b - 1, c: b + 0.25, v: 1, lv: [] }; }));
 const de = (B, f) => hlc(B.filter(f));
 
 // 5. Week and month completeness. Sept 1 2026 is a Tuesday, ISO week 36 opens Monday Aug 31.
@@ -118,17 +130,18 @@ const de = (B, f) => hlc(B.filter(f));
 
 // 6. Drawing: one segment per level and period, colour of the period, monthly first, current period to the right edge.
 {
-  rec.length = 0; E.dessine(g(), defaut);
+  rec.length = 0; E.dessine(g(barsK), defaut);
   let T = rec.filter(x => x.k === 'trait');
   assert.equal(T.length, 7, 'veille seule sur une séance visible');
   assert.ok(T.every(t => t.o.couleur === defaut.jourC), 'couleur journalière');
-  assert.ok(T.every(t => t.p[1][0] === 1e6 && t.p[0][0] === N - 300), 'séance en cours jusqu\'au bord droit');
+  const x0 = Math.max(finK - 300, finK - db.sessions[K].bars.length);
+  assert.ok(T.every(t => t.p[1][0] === 1e6 && t.p[0][0] === x0), 'séance en cours jusqu\'au bord droit');
   assert.equal(T.filter(t => t.o.epaisseur === 1.5).length, 1, 'PP plus épais');
   assert.deepEqual(rec.filter(x => x.k === 'texte').map(x => x.s).sort(), ['PP', 'R1', 'R2', 'R3', 'S1', 'S2', 'S3']);
 
-  rec.length = 0; E.dessine(g(), avec({ etiq: false }));
+  rec.length = 0; E.dessine(g(barsK), avec({ etiq: false }));
   assert.equal(rec.filter(x => x.k === 'texte').length, 0, 'sans étiquettes');
-  rec.length = 0; E.dessine(g(), avec({ jour: false }));
+  rec.length = 0; E.dessine(g(barsK), avec({ jour: false }));
   assert.equal(rec.length, 0, 'journalier décoché');
 
   const B = synth(jours('2026-09-01', '2026-10-16')), n = B.length, debut = B.findIndex(b => b._date === '2026-10-12');
@@ -172,12 +185,51 @@ const de = (B, f) => hlc(B.filter(f));
 
 // 8. Budget: one-minute ETH sessions as deep as TT's ES history (19 sessions), cold compute once, then cached frames.
 {
-  const B = jours('2026-09-22', '2026-10-16').flatMap((date, s) => Array.from({ length: 1380 }, (_, m) => { const b = 7000 + 20 * Math.sin(s + m / 200); return { _date: date, m, o: b, h: b + 1, l: b - 1, c: b + 0.25, v: 1, lv: [] }; }));
+  const B = minutes(jours('2026-09-22', '2026-10-16'));
   const G = Object.assign(g(B), { sym: 'MES' }), r = avec({ formule: 'fibonacci' });
   const t0 = performance.now(); E.dessine(G, r); const froid = performance.now() - t0;
   const t1 = performance.now(); for (let k = 0; k < 50; k++) E.dessine(G, r); const chaud = (performance.now() - t1) / 50;
   assert.ok(froid < 8 && chaud < 1, 'budget 8 ms, mesuré froid ' + froid.toFixed(2) + ' chaud ' + chaud.toFixed(3));
-  const P = E.calcul(g(), defaut), dernier = prix(P.jour[P.jour.length - 1].niv);
-  console.log('OK', N, 'barres ES,', db.sessions.length, 'séances | PP', dernier.PP.toFixed(2), 'R1', dernier.R1.toFixed(2), 'S1', dernier.S1.toFixed(2),
+  const P = E.calcul(g(), defaut), ref = prix(P.jour[K].niv);
+  console.log('OK', N, 'barres ES,', db.sessions.length, 'séances,', P.jour.filter(p => p.niv).length, 'avec pivots | PP du', db.sessions[K].date, ref.PP.toFixed(2), 'R1', ref.R1.toFixed(2), 'S1', ref.S1.toFixed(2),
     '|', B.length, 'barres synthétiques, froid', froid.toFixed(2), 'ms, chaud', chaud.toFixed(3), 'ms');
+}
+
+// 9. Incomplete previous session: no pivots from a session cut at its start or end (history
+// starting mid-session, tick history still loading), an early holiday close still counts.
+{
+  const d = jours('2026-10-05', '2026-10-08'), B = minutes(d);
+  const sauf = f => B.filter(b => b._date !== d[1] || f(b));
+  const jour = (bs, r = defaut) => E.calcul(Object.assign(g(bs), { sym: 'CPL' }), r).jour;
+  assert.ok(jour(B).slice(1).every(p => p.niv), 'séances pleines : pivots partout');
+  let J = jour(sauf(b => b.m >= 300));
+  assert.ok(J[1].niv && !J[2].niv && J[3].niv, 'veille commencée à 23:00 : rien');
+  J = jour(sauf(b => b.m < 600));
+  assert.equal(J[2].niv, null, 'veille arrêtée à 03:59 : rien');
+  J = jour(sauf(b => b.m < 1200));
+  const v = hlc(B.filter(b => b._date === d[1] && b.m < 1200));
+  proche(prix(J[2].niv).PP, (v.H + v.L + v.C) / 3, 'clôture anticipée à 14:00 : pivots gardés');
+  const rth = sauf(b => b.m < 1050 || b.m >= 1320);
+  assert.ok(jour(rth)[2].niv && !jour(rth, avec({ rth: true }))[2].niv, 'RTH seul : veille coupée à 11:30 masquée');
+  assert.deepEqual([[0, 1380], [1379, 1380]].map(([a, b]) => E.outils.complete({ O: 1, m0: a, m1: b - 1 }, [0, b])), [true, false], 'complete()');
+
+  // A week holding an incomplete session gives no pivots to the next one.
+  const S = synth(jours('2026-09-07', '2026-10-02')), coupe = S.filter(b => !(b._date === '2026-09-16' && b.m > 0));
+  const sem = E.calcul(Object.assign(g(coupe), { sym: 'SEM' }), defaut).sem;
+  assert.deepEqual(Array.from(sem, p => p.cle + ':' + !!p.niv), ['2026-37:false', '2026-38:true', '2026-39:false', '2026-40:true'], 'semaine 38 entamée : pas de pivots pour la 39');
+}
+
+// 10. Bars inserted before the last one read (tick history filling a missing day): the cache
+// starts over and gives what a fresh computation gives, no ghost sessions.
+{
+  const d = jours('2026-10-05', '2026-10-09'), B = minutes(d), trou = B.filter(b => b._date !== d[2]);
+  const sur = bs => Object.assign(g(bs), { sym: 'INS' });
+  E.calcul(sur(trou), defaut);
+  const P = E.calcul(sur(B), defaut);
+  assert.deepEqual(Array.from(P.jour, p => p.cle + ':' + p.deb), d.map((_, k) => 'j' + k + ':' + 1380 * k), 'séances retrouvées après insertion');
+  assert.deepEqual(JSON.parse(JSON.stringify(P)), JSON.parse(JSON.stringify(E.calcul(Object.assign(g(B), { sym: 'NEUF2' }), defaut))), 'insertion = calcul complet');
+  // Same bar count, other bars (a day filled in, the last one dropped): the cache must not serve the old result.
+  const d6 = jours('2026-10-05', '2026-10-12'), C = minutes(d6), avant = C.filter(b => b._date !== d6[2]), apres = C.filter(b => b._date !== d6[5]);
+  E.calcul(sur(avant), defaut);
+  assert.deepEqual(JSON.parse(JSON.stringify(E.calcul(sur(apres), defaut))), JSON.parse(JSON.stringify(E.calcul(Object.assign(g(apres), { sym: 'NEUF3' }), defaut))), 'même nombre de barres, autre contenu');
 }
