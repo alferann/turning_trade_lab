@@ -16,6 +16,9 @@ const db = JSON.parse(fs.readFileSync(DB, 'utf8'));
 const bars = [];
 for (const s of db.sessions) for (const b of s.bars) bars.push(Object.assign({ _date: s.date }, b));
 const last = db.sessions[db.sessions.length - 1], iLast = bars.length - last.bars.length;
+// The last session that reaches 16:00 ET, for the session windows: the archive may end in the Asian session.
+const kPlein = db.sessions.findLastIndex(s => s.bars.some(b => b.m >= 1320)), plein = db.sessions[kPlein];
+const iPlein = bars.findIndex(b => b._date === plein.date), BP = bars.slice(0, iPlein + plein.bars.length);
 
 // Each context gets its own study instances; `extra` adds globals such as HFQSessionsMonde.
 const charger = (extra = {}) => { const defs = []; vm.runInContext(SRC, vm.createContext(Object.assign({ HFQExt: { etude(d) { defs.push(d); return true; } }, console, performance }, extra))); return defs; };
@@ -96,8 +99,8 @@ const sem = d => E.outils.semaine(d);
 
 // 4. RTH only on an ETH chart: 09:30-16:00 bars only; ignored on an RTH chart.
 {
-  egal(cour(g(), avec({ rth: true })), reference(last.bars, entre(930, 1320)), 'RTH seul');
-  egal(cour(g(bars, { seance: 'rth' }), avec({ rth: true })), reference(last.bars), 'graphe RTH : pas de filtre');
+  egal(cour(g(BP), avec({ rth: true })), reference(plein.bars, entre(930, 1320)), 'RTH seul');
+  egal(cour(g(BP, { seance: 'rth' }), avec({ rth: true })), reference(plein.bars), 'graphe RTH : pas de filtre');
 }
 
 // 5. US, Europe and Asia sessions with the built-in hours: RTH is m ∈ [930, 1320) on an ETH chart opened
@@ -108,29 +111,29 @@ const sem = d => E.outils.semaine(d);
   assert.deepEqual([...E.outils.bornesET('eu', '2026-10-14')], [180, 570], 'Europe 03:00 → 09:30 ET');
   assert.deepEqual([...E.outils.bornesET('asie', '2026-10-14')], [1080, 180], 'Asie 18:00 → 03:00 ET');
   assert.deepEqual([...E.outils.bornesET('eu', '2026-10-26')], [240, 570], 'Europe 04:00 ET, Londres à l\'heure d\'hiver avant New York');
-  // Windows of the last session's date, in chart minutes.
-  const fenDe = T => { const [a, b] = E.outils.bornesET(T, last.date).map(v => (v - 1080 + 1440) % 1440); return entre(a, b <= a ? b + 1440 : b); };
+  // Windows of that session's date, in chart minutes.
+  const fenDe = T => { const [a, b] = E.outils.bornesET(T, plein.date).map(v => (v - 1080 + 1440) % 1440); return entre(a, b <= a ? b + 1440 : b); };
   const fen = { us: fenDe('us'), eu: fenDe('eu'), asie: fenDe('asie') }, total = {};
   for (const T of Object.keys(fen)) {
-    const R = cour(g(), avec({ periode: T }));
-    egal(R, reference(last.bars, fen[T]), T);
-    assert.deepEqual([R.deb, R.fin], [iLast + last.bars.findIndex(b => fen[T](b.m)), iLast + last.bars.findLastIndex(b => fen[T](b.m))], T + ' : barres de la fenêtre');
-    assert.equal(R.cle, last.date);
+    const R = cour(g(BP), avec({ periode: T }));
+    egal(R, reference(plein.bars, fen[T]), T);
+    assert.deepEqual([R.deb, R.fin], [iPlein + plein.bars.findIndex(b => fen[T](b.m)), iPlein + plein.bars.findLastIndex(b => fen[T](b.m))], T + ' : barres de la fenêtre');
+    assert.equal(R.cle, plein.date);
     for (const [t, e] of Object.entries(plat(R))) { const s = total[t] ||= [0, 0]; s[0] += e[0]; s[1] += e[1]; }
   }
-  assert.deepEqual(total, reference(last.bars, m => m < 1320), 'Asie + Europe + US = séance sans sa dernière heure');
+  assert.deepEqual(total, reference(plein.bars, m => m < 1320), 'Asie + Europe + US = séance sans sa dernière heure');
   // Previous sessions keep their own window; a recording cut before 09:30 has no RTH.
-  const prec = complet(g(bars, { premiere: 0 }), avec({ periode: 'us', hist: 9 })).prec;
-  const avecRTH = db.sessions.slice(0, -1).filter(s => s.bars.some(b => fen.us(b.m)));
+  const prec = complet(g(BP, { premiere: 0 }), avec({ periode: 'us', hist: 9 })).prec;
+  const avecRTH = db.sessions.slice(0, kPlein).filter(s => s.bars.some(b => fen.us(b.m)));
   assert.equal(prec.length, avecRTH.length, 'une RTH par séance précédente qui en a');
   prec.forEach((R, k) => egal(R, reference(avecRTH[k].bars, fen.us), 'RTH du ' + avecRTH[k].date));
   // Before 09:30 the last US session is the previous one; Europe is already today's.
-  const tot = bars.slice(0, iLast + last.bars.findIndex(b => b.m >= 900));
+  const tot = BP.slice(0, iPlein + plein.bars.findIndex(b => b.m >= 900));
   assert.equal(cour(g(tot), avec({ periode: 'us' })).cle, avecRTH.at(-1).date, 'avant 09:30 : RTH de la veille');
-  assert.equal(cour(g(tot), avec({ periode: 'eu' })).cle, last.date, 'Europe du jour');
+  assert.equal(cour(g(tot), avec({ periode: 'eu' })).cle, plein.date, 'Europe du jour');
   // TT's world sessions win over the defaults: US moved to 10:00-11:00 ET.
   const D = charger({ HFQSessionsMonde: { bornes: () => [{ id: 'us', debut: 36000, fin: 39600 }] } })[0];
-  egal(cour(g(), avec({ periode: 'us' }), D), reference(last.bars, entre(960, 1020)), 'sessions de TT');
+  egal(cour(g(BP), avec({ periode: 'us' }), D), reference(plein.bars, entre(960, 1020)), 'sessions de TT');
 }
 
 // Synthetic weekday sessions of three one-minute bars with three levels each.
@@ -310,8 +313,9 @@ if (fs.existsSync(path.join(PAYLOAD, 'hfq-composite-vp.js'))) {
 } else console.warn('payload de TT introuvable, comparaison avec son profil sautée :', PAYLOAD);
 
 // 13. Budget: a month of one-minute ETH sessions with five levels per bar, the month and every previous
-// session drawn by two instances. The first compute spans several frames, each under TT's 8 ms, and
-// lands on the brute-force profiles; then cached frames.
+// session drawn by two instances. The first compute spans several frames, neither instance over 8 ms three
+// frames in a row (TT's suspension rule, so a lone GC pause does not fail the bench), and lands on the
+// brute-force profiles; then cached frames.
 {
   const B = jours('2026-09-22', '2026-10-16').flatMap((date, s) => Array.from({ length: 1380 }, (_, m) => {
     const b = Math.round((7000 + 20 * Math.sin(s + m / 200)) * 4) / 4;
@@ -319,14 +323,18 @@ if (fs.existsSync(path.join(PAYLOAD, 'hfq-composite-vp.js'))) {
   }));
   const G = g(B, { sym: 'MES', premiere: 0, cadre: { gauche: 0, droite: 1000, haut: 0, bas: 600, largeur: 1000, hauteur: 600 }, x: i => i * 1000 / B.length, y: v => 600 - (v - 6970) * 10 });
   const rM = avec({ periode: 'mois', achatC: '#000001', venteC: '#000002' }), rJ = avec({ hist: 30 });
-  let images = 0, pire = 0, prets;
+  let images = 0, pire = 0, prets, suspendue = false;
+  const lents = new Map();
   do {
     rec.length = 0;
-    for (const [D, r] of [[defs[2], rM], [E, rJ]]) { const t = performance.now(); D.dessine(G, r); pire = Math.max(pire, performance.now() - t); }
+    for (const [D, r] of [[defs[2], rM], [E, rJ]]) {
+      const t = performance.now(); D.dessine(G, r); const ms = performance.now() - t, l = ms > 8 ? (lents.get(D) || 0) + 1 : 0;
+      pire = Math.max(pire, ms); lents.set(D, l); suspendue ||= l >= 3;
+    }
     images++;
     prets = new Set(rec.filter(x => x.k === 'rect').map(x => x.c)).size;
   } while (prets < 4 && images < 100);
-  assert.ok(images > 1 && pire < 8, 'calcul étalé : ' + images + ' images, pire ' + pire.toFixed(2) + ' ms');
+  assert.ok(images > 1 && !suspendue, 'calcul étalé : ' + images + ' images, pire ' + pire.toFixed(2) + ' ms');
   egal(cour(G, rM, defs[2]), reference(parDate(B, d => d >= '2026-10')), 'octobre, calcul étalé');
   const X = complet(G, rJ);
   assert.equal(X.prec.length, 18, 'dix-huit séances précédentes');
