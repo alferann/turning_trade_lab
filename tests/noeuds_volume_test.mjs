@@ -200,6 +200,19 @@ const sierra = [pane('session', { title: 'Delta' }), pane('session', { title: 'V
   const a = image().profils[0].noeuds.hvn.length, b = image(avec({ hvnProm: 60 })).profils[0].noeuds.hvn.length;
   assert.equal(appels.length, 0, 'réglage de détection sans appel');
   assert.ok(b < a, 'proéminence 60 % : moins de HVN (' + a + ' → ' + b + ')');
+  // Bars inserted before the last one read (tick history filling in): the composite is rebuilt, at most
+  // once a minute since each rebuild freezes the chart for 0.6 s; a mere new bar does not count.
+  const insere = () => { B.splice(B.length - 100, 0, Object.assign({}, B[B.length - 101])); image(); image(); return appels.filter(a => a[0] === 'rolling').length; };
+  horloge += 1000; appels.length = 0;
+  assert.equal(insere(), 0, 'insertion moins d\'une minute après le composite : gardé');
+  horloge += 60000; appels.length = 0;
+  assert.equal(insere(), 1, 'insertion une minute après : composite relu');
+  horloge += 30000; appels.length = 0;
+  assert.equal(insere(), 0, 'nouvelle insertion trente secondes après : gardé');
+  horloge += 30000; appels.length = 0; image(); image();
+  assert.equal(appels.filter(a => a[0] === 'rolling').length, 1, 'la minute écoulée, l\'insertion en attente est relue');
+  horloge += 60000; appels.length = 0; B.push(Object.assign({}, B[B.length - 1])); image(); image();
+  assert.equal(appels.filter(a => a[0] === 'rolling').length, 0, 'nouvelle barre en fin : composite gardé');
   // Another instrument is rebuilt at once, even right after a cold frame.
   image(); appels.length = 0; E.calcul(Object.assign(g({ B }), { sym: 'NQ' }), defaut);
   assert.equal(appels.length, 2, 'changement d\'instrument : recalcul immédiat');

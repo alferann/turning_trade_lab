@@ -22,6 +22,10 @@ var LVN_PROF = 0.10, EPAIS = 0.25;
 // (0,6 s pour 90 seances dans le constructeur de TT) une fois par seance du
 // graphe ; sur le footprint, qui ne date pas ses barres, une fois par graphe.
 var VIF_MS = 300;
+// ponytail: le composite se relit aussi quand des barres sont inserees avant
+// la derniere lue (historique en ticks qui se remplit), mais au plus une fois
+// par minute : chaque relecture fige le graphe 0,6 s, et le remplissage dure.
+var INSERE_MS = 60000;
 // Vrai si l'image precedente a recalcule un profil. TT suspend une etude
 // au-dela de 8 ms sur trois images d'affilee ; son constructeur de profil
 // prend 5 a 7 ms sur une seance d'ES, bien plus sur une fenetre visible tres
@@ -30,6 +34,9 @@ var FROIDE = false;
 var COURT = {session:'SVP', visible:'CVP', rolling:'CMP'};
 var FILET = ' ────────────────────';
 var CACHE = {};
+
+// Cle d'une barre, pour reconnaitre la derniere lue a son index.
+function cleBarre(b){ return b ? (b._date || '') + ':' + b.m : ''; }
 
 // Anglais : nom, description, reglages, options et textes du canevas.
 var DESC = 'HVN, LVN, ledges et shelves détectés sur les panneaux de profil de volume du graphe (séance, fenêtre visible, composite), tracés en zones.';
@@ -216,11 +223,13 @@ function profil(g, por, fn, r, froide){
   var fixe = por.scope === 'rolling' ? last && last._date || '' : n + (por.scope === 'visible' ? ':' + g.premiere + ':' + g.derniere : '');
   var vif = last ? [last.c, last.v, g.niveaux(n - 1).n].join('|') : '';
   var C = CACHE[por.cle], t = Date.now();
-  var perime = C && (C.fixe !== fixe || (C.vif !== vif && por.scope !== 'rolling' && t - C.t >= VIF_MS));
+  // Seance et fenetre visible changent de cle avec `n` ; le composite, lui, ne voit une insertion qu'a sa derniere barre lue deplacee.
+  var insere = C && por.scope === 'rolling' && C.n > 0 && n >= C.n && cleBarre(g.barre(C.n - 1)) !== C.der && t - C.t >= INSERE_MS;
+  var perime = C && (C.fixe !== fixe || insere || (C.vif !== vif && por.scope !== 'rolling' && t - C.t >= VIF_MS));
   if(!C || C.base !== base || (perime && !froide)){
     var b = null;
     try{ b = fn(por.scope, {days:por.days || 90}); }catch(_){ b = null; }
-    C = CACHE[por.cle] = {base:base, fixe:fixe, vif:vif, t:t, P:b && b.profile || null, cleR:'', N:null};
+    C = CACHE[por.cle] = {base:base, fixe:fixe, vif:vif, t:t, n:n, der:cleBarre(last), P:b && b.profile || null, cleR:'', N:null};
     FROIDE = true;
   }
   var cleR = DETECTION.map(function(k){ return r[k]; }).join('|');
