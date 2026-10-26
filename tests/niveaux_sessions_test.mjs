@@ -59,10 +59,20 @@ function attendu(B, idx) {
 }
 const indices = pred => B => B.map((b, k) => (pred(b) ? k : -1)).filter(k => k >= 0);
 const resume = o => o && { H: { p: o.H.p, i: o.H.i, m: o.H.m, c: o.H.c }, L: { p: o.L.p, i: o.L.i, m: o.L.m, c: o.L.c } };
-const dates = db.sessions.map(s => s.date), der = dates[dates.length - 1], avant = dates[dates.length - 2];
-// Default windows in October (London and New York both on summer time), in chart minutes
-// of an ETH chart opened at 18:00 ET, for the middle of a one-minute bar.
+// A bar belongs to a window [a, z) of chart minutes (ETH chart opened at 18:00 ET) by its middle.
 const dans = (b, a, z) => b.m + 0.5 >= a && b.m + 0.5 < z;
+const plage = o => Array.from({ length: o.fin - o.deb + 1 }, (_, k) => o.deb + k);
+// Occurrences of the default sessions: runs of bars with one id and session date, each bar classified
+// with the windows of its date, which section 1 checks against TT's module. Whatever the archive holds.
+function occurrences(B) {
+  const out = [];
+  B.forEach((b, k) => {
+    const id = E.outils.fenetres(b._date, 1080).find(f => dans(b, f.a, f.b)).id, c = id + ':' + b._date, o = out[out.length - 1];
+    if (o && o.c === c) o.fin = k; else out.push({ c, id, deb: k, fin: k });
+  });
+  return out;
+}
+const OCC = occurrences(bars);
 
 // 1. Windows: the defaults agree with TT's module, including the week when London has
 // left summer time and New York has not (08:00 London = 04:00 ET on 2026-10-26).
@@ -77,15 +87,15 @@ const dans = (b, a, z) => b.m + 0.5 >= a && b.m + 0.5 < z;
   assert.deepEqual([eu.a, eu.b], [600, 930], 'Londres à 04:00 ET le 2026-10-26');
 }
 
-// 2. Last closed session of each kind on real ES bars. The last session of the archive stops
-// before 09:30, so London is in progress: Tokyo is that day's, the others the day before's.
+// 2. Last closed session of each kind on real ES bars: the last occurrence of its id before the one
+// holding the live bar, which is in progress.
 const P = plein(E, g(), defaut);
 {
-  const S = (d, a, z) => attendu(bars, indices(b => b._date === d && dans(b, a, z))(bars));
-  const A = { asie: S(der, 0, 540), eu: S(avant, 540, 930), us: S(avant, 930, 1320), fin: S(avant, 1320, 1440) };
+  const A = {};
+  for (const o of OCC.slice(0, -1)) A[o.id] = attendu(bars, plage(o));
   assert.deepEqual(Object.keys(P.D).sort(), Object.keys(A).sort(), 'une session close par id');
   for (const id in A) assert.deepEqual(resume(P.D[id]), A[id], 'session ' + id);
-  assert.equal(P.cour.id, 'eu', 'Londres en cours');
+  assert.equal(P.cour.id, OCC[OCC.length - 1].id, 'session en cours');
   // Not a degenerate fixture: something gets touched, something does not.
   const t = Object.values(A).flatMap(o => [o.H, o.L]);
   assert.ok(t.some(v => v.m >= 0) && t.some(v => v.m < 0), 'des niveaux touchés et d\'autres vierges');
@@ -95,15 +105,19 @@ const P = plein(E, g(), defaut);
 }
 
 // 3. Tokyo moved to 19:00 ET in TT: the close session runs 16:00-19:00 and straddles the
-// chart opening, its tail being the first hour of the next chart session.
+// chart opening, its tail being the first hour of the next chart session. History cut in the
+// London session of the last day Y whose previous archived day X reaches its close.
 {
   const { E: T, vc } = charge(true);
-  plein(T, g(), defaut);
   vm.runInContext('HFQSessionsMonde.ecrire([{id:"asie", h:19, m:0}])', vc);
-  const R = plein(T, g(), defaut);
-  const fin = indices(b => (b._date === avant && b.m + 0.5 >= 1320) || (b._date === der && b.m + 0.5 < 60))(bars);
-  assert.deepEqual(resume(R.D.fin), attendu(bars, fin), 'clôture à cheval sur l\'ouverture');
-  assert.deepEqual(resume(R.D.asie), attendu(bars, indices(b => b._date === der && dans(b, 60, 540))(bars)), 'Tokyo depuis 19:00');
+  const jours = db.sessions.map(s => s.date), a = d => T.outils.fenetres(d, 1080).find(f => f.id === 'eu').a;
+  const y = jours.findLast((d, k) => k && bars.some(b => b._date === jours[k - 1] && b.m >= 1320) && bars.some(b => b._date === d && dans(b, a(d), a(d) + 30)));
+  assert.ok(y, 'une veille qui va jusqu\'à la clôture, suivie d\'un jour qui atteint Londres');
+  const x = jours[jours.indexOf(y) - 1], B = bars.slice(0, bars.findIndex(b => b._date === y && dans(b, a(y) + 30, 1440)));
+  const R = plein(T, g(B), defaut);
+  const fin = indices(b => (b._date === x && b.m + 0.5 >= 1320) || (b._date === y && b.m + 0.5 < 60))(B);
+  assert.deepEqual(resume(R.D.fin), attendu(B, fin), 'clôture à cheval sur l\'ouverture');
+  assert.deepEqual(resume(R.D.asie), attendu(B, indices(b => b._date === y && dans(b, 60, a(y)))(B)), 'Tokyo depuis 19:00');
 }
 
 // 4. RTH chart: New York only, the previous one is the day before the last RTH session.
@@ -139,10 +153,7 @@ function croissance(alerte) {
 // Expected notifications: a closed session is watched from its last bar until the next one
 // of the same kind closes; its first touch of each type rings if it falls after K.
 function sonneries(type) {
-  const ids = bars.map(b => (dans(b, 0, 540) ? 'asie' : dans(b, 540, 930) ? 'eu' : dans(b, 930, 1320) ? 'us' : 'fin') + ':' + b._date);
-  const occ = [];
-  ids.forEach((c, k) => { if (!k || c !== ids[k - 1]) occ.push({ id: c.split(':')[0], deb: k, fin: k }); else occ[occ.length - 1].fin = k; });
-  const out = [];
+  const occ = OCC, out = [];
   occ.forEach((o, n) => {
     if (n === occ.length - 1) return;
     const suiv = occ.slice(n + 1).find(x => x.id === o.id), jusqua = suiv && suiv !== occ[occ.length - 1] ? suiv.fin : N - 1;
@@ -170,8 +181,7 @@ const lu = notes => notes.map(t => { const m = /^ES · (.+) ([HL]) \| .+ : ([\d.
 // 7. The first pass never rings, even when its live bar touches a level; a replay jump
 // rings only for its last bars; a rewind starts over silently and matches a fresh pass.
 {
-  const { E: T, notes } = charge(), r = avec({ alerte: 'meche' }), t = P.D.eu.H.m;
-  assert.ok(t >= 0, 'le haut de Londres est touché');
+  const { E: T, notes } = charge(), r = avec({ alerte: 'meche' }), t = Object.values(P.D).flatMap(o => [o.H, o.L]).find(v => v.m >= 0).m;
   plein(T, g(bars, 'eth', t + 1), r);
   T.dessine(g(bars, 'eth', t + 1), r);
   T.dessine(g(), r);
@@ -189,7 +199,7 @@ const lu = notes => notes.map(t => { const m = /^ES · (.+) ([HL]) \| .+ : ([\d.
     const A = Object.values(P.D).flatMap(o => [o.H, o.L]).map(v => [v.i, champ && v[champ] >= 0 ? v[champ] : 1e6, v.p]);
     assert.deepEqual(trace(avec({ jusqua })), A, 'traits ' + jusqua);
   }
-  assert.equal(trace(avec({ us: false })).length, 6, 'New York décoché');
+  assert.equal(trace(avec({ us: false })).length, 2 * Object.keys(P.D).length - 2, 'New York décoché');
   assert.ok(rec.some(x => x.k === 'texte' && x.s === 'Londres H') && !rec.some(x => x.k === 'texte' && x.s.startsWith('New York')), 'étiquettes');
 }
 
