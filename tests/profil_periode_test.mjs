@@ -86,8 +86,10 @@ const sem = d => E.outils.semaine(d);
     egal(R, reference(S.flatMap(s => s.bars)), T + ' : ' + S.length + ' séances');
     assert.equal(R.partiel, partiel(T, S), T + ' : partiel');
     assert.equal(R.cle, T === 'sem' ? sem(last.date).slice(5) : last.date.slice(0, 7));
+    // The last three previous periods, whatever the archive spans, but the partial first one.
     const avant = db.sessions.filter(s => cle(s.date) < cle(last.date)), prec = complet(g(bars, { premiere: 0 }), avec({ periode: T, hist: 3 })).prec;
-    if (avant.length && partiel(T, avant)) assert.equal(prec.length, 0, T + ' précédent partiel omis');
+    const attendu = [...new Set(avant.map(s => cle(s.date)))].slice(-3).filter(c => !(c === cle(avant[0]?.date) && partiel(T, avant)));
+    assert.deepEqual(prec.map(R => R.cle), attendu.map(c => T === 'sem' ? c.slice(5) : c), T + ' : précédents, partiel omis');
   }
 }
 
@@ -97,13 +99,17 @@ const sem = d => E.outils.semaine(d);
   egal(cour(g(bars, { seance: 'rth' }), avec({ rth: true })), reference(last.bars), 'graphe RTH : pas de filtre');
 }
 
-// 5. US, Europe and Asia sessions with the built-in hours: RTH is m ∈ [930, 1320), Europe [540, 930),
-// Asia [0, 540) on an ETH chart opened at 18:00 ET; the three cover the session but its last hour.
+// 5. US, Europe and Asia sessions with the built-in hours: RTH is m ∈ [930, 1320) on an ETH chart opened
+// at 18:00 ET, Asia runs from the open to Europe, which starts at 08:00 London and so moves against ET
+// between the two DST switches; the three cover the session but its last hour.
 {
   assert.deepEqual([...E.outils.bornesET('us', '2026-10-14')], [570, 960], 'RTH 09:30 → 16:00 ET');
   assert.deepEqual([...E.outils.bornesET('eu', '2026-10-14')], [180, 570], 'Europe 03:00 → 09:30 ET');
   assert.deepEqual([...E.outils.bornesET('asie', '2026-10-14')], [1080, 180], 'Asie 18:00 → 03:00 ET');
-  const fen = { us: entre(930, 1320), eu: entre(540, 930), asie: entre(0, 540) }, total = {};
+  assert.deepEqual([...E.outils.bornesET('eu', '2026-10-26')], [240, 570], 'Europe 04:00 ET, Londres à l\'heure d\'hiver avant New York');
+  // Windows of the last session's date, in chart minutes.
+  const fenDe = T => { const [a, b] = E.outils.bornesET(T, last.date).map(v => (v - 1080 + 1440) % 1440); return entre(a, b <= a ? b + 1440 : b); };
+  const fen = { us: fenDe('us'), eu: fenDe('eu'), asie: fenDe('asie') }, total = {};
   for (const T of Object.keys(fen)) {
     const R = cour(g(), avec({ periode: T }));
     egal(R, reference(last.bars, fen[T]), T);
@@ -112,13 +118,14 @@ const sem = d => E.outils.semaine(d);
     for (const [t, e] of Object.entries(plat(R))) { const s = total[t] ||= [0, 0]; s[0] += e[0]; s[1] += e[1]; }
   }
   assert.deepEqual(total, reference(last.bars, m => m < 1320), 'Asie + Europe + US = séance sans sa dernière heure');
-  // Previous sessions keep their own window.
+  // Previous sessions keep their own window; a recording cut before 09:30 has no RTH.
   const prec = complet(g(bars, { premiere: 0 }), avec({ periode: 'us', hist: 9 })).prec;
-  assert.equal(prec.length, db.sessions.length - 1, 'une RTH par séance précédente');
-  prec.forEach((R, k) => egal(R, reference(db.sessions[k].bars, fen.us), 'RTH du ' + db.sessions[k].date));
+  const avecRTH = db.sessions.slice(0, -1).filter(s => s.bars.some(b => fen.us(b.m)));
+  assert.equal(prec.length, avecRTH.length, 'une RTH par séance précédente qui en a');
+  prec.forEach((R, k) => egal(R, reference(avecRTH[k].bars, fen.us), 'RTH du ' + avecRTH[k].date));
   // Before 09:30 the last US session is the previous one; Europe is already today's.
   const tot = bars.slice(0, iLast + last.bars.findIndex(b => b.m >= 900));
-  assert.equal(cour(g(tot), avec({ periode: 'us' })).cle, db.sessions[db.sessions.length - 2].date, 'avant 09:30 : RTH de la veille');
+  assert.equal(cour(g(tot), avec({ periode: 'us' })).cle, avecRTH.at(-1).date, 'avant 09:30 : RTH de la veille');
   assert.equal(cour(g(tot), avec({ periode: 'eu' })).cle, last.date, 'Europe du jour');
   // TT's world sessions win over the defaults: US moved to 10:00-11:00 ET.
   const D = charger({ HFQSessionsMonde: { bornes: () => [{ id: 'us', debut: 36000, fin: 39600 }] } })[0];
