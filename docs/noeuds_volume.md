@@ -62,7 +62,7 @@ Chaque sous-section finit par sa couleur : orange, violet, bleu clair, vert par 
 
 - L'étude lit les panneaux par une interface interne de TT (`HFQVPPanels`, `caVppBundle`, `fpVppBundle`) : une mise à jour de TT peut la casser, le message « profil de volume indisponible sur ce graphe » le signale.
 - Seuils en rangées : un même réglage donne des nœuds plus larges en prix sur un composite que sur une séance. Les seuils de 10 % et 25 % sont fixes.
-- Le composite se recalcule une fois par séance du graphe, une seule fois par graphe sur le footprint qui ne date pas ses barres. TT met environ 0,6 s à le construire sur 90 séances : le premier affichage peut marquer un temps.
+- Le composite se recalcule une fois par séance du graphe, une seule fois par graphe sur le footprint qui ne date pas ses barres. TT met environ 0,6 s à le construire sur 90 séances : le premier affichage peut marquer un temps. Pendant que l'historique en ticks se remplit, il se recalcule aussi, mais au plus une fois par minute.
 - En direct, le profil suit la barre en cours au plus toutes les 300 ms, et une image sur deux au plus recalcule un profil, pour rester sous le budget de 8 ms par image : les nœuds peuvent avoir une image de retard.
 - Les nœuds sont ceux du profil entier, sur toute la largeur du graphe : l'étude ne dit pas quand un nœud s'est formé ni s'il a déjà été retesté.
 
@@ -130,6 +130,6 @@ Each sub-section ends with its colour: orange, purple, light blue, green by defa
 
 - The study reads the panels through an internal TT interface (`HFQVPPanels`, `caVppBundle`, `fpVppBundle`): a TT update may break it, and the message "volume profile unavailable on this chart" says so.
 - Thresholds in rows: the same setting gives wider nodes in price on a composite than on a session. The 10 % and 25 % thresholds are fixed.
-- The composite is rebuilt once per chart session, only once per chart on the footprint, which does not date its bars. TT takes about 0.6 s to build it over 90 sessions: the first display may pause.
+- The composite is rebuilt once per chart session, only once per chart on the footprint, which does not date its bars. TT takes about 0.6 s to build it over 90 sessions: the first display may pause. While tick history fills in, it is rebuilt too, at most once a minute.
 - Live, the profile follows the current bar at most every 300 ms, and at most one frame in two rebuilds a profile, to stay within TT's 8 ms per frame budget: nodes may lag by one frame.
 - Nodes come from the whole profile and span the whole chart width: the study does not tell when a node formed or whether it was already retested.

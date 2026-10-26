@@ -17,7 +17,8 @@ const DB = path.join(process.env.TT_DATA || path.join(process.env.HOME, '.local/
 const db = JSON.parse(fs.readFileSync(DB, 'utf8'));
 const bars = [];
 for (const s of db.sessions) for (const b of s.bars) bars.push(Object.assign({ _date: s.date }, b));
-const last = db.sessions[db.sessions.length - 1];
+// Session profile of the fake bundle: the last session that reaches 16:00 ET, the archive may end in the Asian session.
+const last = db.sessions.findLast(s => s.bars.some(b => b.m >= 1320));
 
 // One context holds TT's contract and profile builder, the study, and a fake chart window.
 let horloge = 0;
@@ -92,9 +93,11 @@ const dans = (z, p) => p > z.bas && p < z.haut;
   assert.ok(N.hvn.every(z => ligne(z.prix) === 20 || ligne(z.prix) === 60), 'HVN inchangés');
 }
 
-// 4. Real ES profiles built by TT, whole ETH session and RTH only.
+// 4. Real ES profiles built by TT, whole ETH session and RTH only; a recording cut before 09:30 or a session
+// still in Asia has no RTH profile.
 const reels = [];
 for (const s of db.sessions) for (const [nom, B] of [['ETH', s.bars], ['RTH', s.bars.filter(b => b.m >= 930 && b.m < 1320)]]) {
+  if (!B.length) continue;
   const P = VP.buildFromBars(B, { tick: 0.25, mode: 'session' }).profile, N = det(P), cle = s.date + ' ' + nom;
   const lo = P.prices[0] - P.tick, hi = P.prices[P.prices.length - 1] + P.tick;
   for (const t of ['hvn', 'lvn', 'shelf', 'ledge']) for (const z of N[t]) assert.ok(z.prix >= lo && z.prix <= hi, cle + ' : ' + t + ' dans le profil');
@@ -197,6 +200,19 @@ const sierra = [pane('session', { title: 'Delta' }), pane('session', { title: 'V
   const a = image().profils[0].noeuds.hvn.length, b = image(avec({ hvnProm: 60 })).profils[0].noeuds.hvn.length;
   assert.equal(appels.length, 0, 'réglage de détection sans appel');
   assert.ok(b < a, 'proéminence 60 % : moins de HVN (' + a + ' → ' + b + ')');
+  // Bars inserted before the last one read (tick history filling in): the composite is rebuilt, at most
+  // once a minute since each rebuild freezes the chart for 0.6 s; a mere new bar does not count.
+  const insere = () => { B.splice(B.length - 100, 0, Object.assign({}, B[B.length - 101])); image(); image(); return appels.filter(a => a[0] === 'rolling').length; };
+  horloge += 1000; appels.length = 0;
+  assert.equal(insere(), 0, 'insertion moins d\'une minute après le composite : gardé');
+  horloge += 60000; appels.length = 0;
+  assert.equal(insere(), 1, 'insertion une minute après : composite relu');
+  horloge += 30000; appels.length = 0;
+  assert.equal(insere(), 0, 'nouvelle insertion trente secondes après : gardé');
+  horloge += 30000; appels.length = 0; image(); image();
+  assert.equal(appels.filter(a => a[0] === 'rolling').length, 1, 'la minute écoulée, l\'insertion en attente est relue');
+  horloge += 60000; appels.length = 0; B.push(Object.assign({}, B[B.length - 1])); image(); image();
+  assert.equal(appels.filter(a => a[0] === 'rolling').length, 0, 'nouvelle barre en fin : composite gardé');
   // Another instrument is rebuilt at once, even right after a cold frame.
   image(); appels.length = 0; E.calcul(Object.assign(g({ B }), { sym: 'NQ' }), defaut);
   assert.equal(appels.length, 2, 'changement d\'instrument : recalcul immédiat');
@@ -213,7 +229,9 @@ const sierra = [pane('session', { title: 'Delta' }), pane('session', { title: 'V
   for (const t of ['hvn', 'lvn', 'shelf', 'ledge']) assert.equal(rec.filter(x => x.st && x.st.couleur === defaut[t + 'C']).length > 0, N[t].length > 0, 'couleur ' + t);
   assert.ok(L.filter(x => x.st.epaisseur === 1.5).length === N.ledge.length, 'ledges en trait épais');
   assert.ok(L.filter(x => x.st.pointille).length === N.lvn.length, 'LVN en tirets');
-  assert.ok(T.some(x => x.s === 'HVN') && T.some(x => x.s === 'LVN') && T.some(x => /^Ledge (haut|bas)$/.test(x.s)), 'étiquettes : ' + T.map(x => x.s).join(', '));
+  // A label for each node type the profile holds, none for the others (the session drawn has no ledge on some days).
+  for (const [t, re] of [['hvn', /^HVN$/], ['lvn', /^LVN$/], ['ledge', /^Ledge (haut|bas)$/]])
+    assert.equal(T.some(x => re.test(x.s)), N[t].length > 0, 'étiquettes ' + t + ' : ' + T.map(x => x.s).join(', '));
   const ys = T.map(x => x.y).sort((a, b) => a - b);
   assert.ok(ys.every((y, i) => !i || y - ys[i - 1] >= 11), 'étiquettes espacées');
   assert.ok(T.every(x => x.x === 996 && x.st.align === 'right'), 'au bord droit');
