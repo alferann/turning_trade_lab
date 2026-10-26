@@ -7,15 +7,22 @@
 //
 // Les periodes se lisent sur la date de seance des barres : le footprint ne
 // datant pas les siennes, il n'y a la que les pivots journaliers. Une semaine
-// ou un mois precedent qui n'est pas charge en entier ne donne pas de pivots.
+// ou un mois precedent qui n'est pas charge en entier ne donne pas de pivots,
+// ni une veille qui ne couvre pas sa seance (historique en ticks encore en
+// cours de chargement, debut d'historique en pleine seance).
 (function(){
 
 // ponytail: minutes de seance de RTH (09:30 a 16:00 ET) sur un graphe ETH ouvert a 18:00 ET (ES, NQ).
 var RTH = [930, 1320];
+// ponytail: duree de la seance du graphe en minutes, 23 h en ETH et 6 h 30 en RTH (ES, NQ).
+var DUREE = {eth:1380, rth:390};
+// Une seance est complete si ses barres partent dans la premiere heure et
+// vont jusqu'a 4 h de la fin : une cloture anticipee de jour ferie passe.
+var MARGE = [60, 240];
 // Dessin du mois au jour, pour que le journalier passe au-dessus.
 var PERIODES = [{k:'mois', p:'m'}, {k:'sem', p:'w'}, {k:'jour', p:''}];
 var FILET = ' ────────────────────';
-var SEANCES = {sig:'', n:0, J:[], prev:null, sess:0}, CACHE = {cle:'', P:null};
+var SEANCES = {sig:'', gen:0, n:0, der:'', J:[], prev:null, sess:0}, CACHE = {cle:'', P:null};
 
 // Anglais : nom, description, reglages et options tels que le panneau les affiche.
 var DESC = 'PP, R1 à R3, S1 à S3 journaliers, hebdomadaires et mensuels, formule classique, Fibonacci, Camarilla, Woodie ou DeMark, une couleur par période.';
@@ -85,21 +92,29 @@ function niveaux(f, H, L, C, O){
 function ajoute(p, b, i, rth){
   p.fin = i;
   if(b._trou || (rth && (+b.m < RTH[0] || +b.m >= RTH[1]))) return;
-  if(p.O === null) p.O = b.o;
+  if(p.O === null){ p.O = b.o; p.m0 = +b.m; }
+  p.m1 = +b.m;
   p.C = b.c;
   if(b.h > p.H) p.H = b.h;
   if(b.l < p.L) p.L = b.l;
 }
 
-function periode(cle, debut, deb){ return {cle:cle, debut:debut, deb:deb, fin:deb, H:-Infinity, L:Infinity, O:null, C:null, niv:null}; }
+function periode(cle, debut, deb){ return {cle:cle, debut:debut, deb:deb, fin:deb, H:-Infinity, L:Infinity, O:null, C:null, m0:null, m1:null, complet:true, niv:null}; }
+
+// Vrai si les barres comptees de la seance couvrent la fenetre f [debut, fin) en minutes.
+function complete(p, f){ return p.O !== null && p.m0 <= f[0] + MARGE[0] && p.m1 >= f[1] - MARGE[1]; }
+
+function cleBarre(b){ return b ? (b._date || '') + ':' + b.m : ''; }
 
 // Seances du graphe, barre de debut et de fin, haut, bas, ouverture et
 // cloture. Incremental : si le graphe a seulement grandi, la derniere barre
-// connue est reprise et seules les nouvelles sont lues.
+// connue est reprise et seules les nouvelles sont lues. Si elle n'est plus a
+// son index (barres inserees plus tot, comme l'historique en ticks qui se
+// remplit), tout repart de zero ; `gen` change alors pour vider le cache.
 function seances(S, g, rth){
   var n = g.n | 0, b0 = n ? g.barre(0) : null, b;
-  var sig = [g.sym, g.tf, g.seance, rth, b0 ? (b0._date || '') + ':' + b0.m : ''].join('|');
-  if(sig !== S.sig || n < S.n){ S.sig = sig; S.n = 0; S.J = []; S.prev = null; S.sess = 0; }
+  var sig = [g.sym, g.tf, g.seance, rth, cleBarre(b0)].join('|');
+  if(sig !== S.sig || n < S.n || (S.n && cleBarre(g.barre(S.n - 1)) !== S.der)){ S.sig = sig; S.gen++; S.n = 0; S.der = ''; S.J = []; S.prev = null; S.sess = 0; }
   var J = S.J, prev = S.prev, sess = S.sess;
   if(S.n > 0 && J.length && (b = g.barre(S.n - 1))){ ajoute(J[J.length - 1], b, S.n - 1, rth); prev = b; }
   for(var i = S.n; i < n; i++){
@@ -112,7 +127,7 @@ function seances(S, g, rth){
     ajoute(J[J.length - 1], b, i, rth);
     prev = b;
   }
-  S.n = n; S.prev = prev; S.sess = sess;
+  S.n = n; S.prev = prev; S.sess = sess; S.der = cleBarre(prev);
   return J;
 }
 
@@ -124,6 +139,7 @@ function regroupe(J, cleDe){
     if(!c) continue;
     if(!p || p.cle !== c) out.push(p = periode(c, s.debut, s.deb));
     p.fin = s.fin;
+    if(!s.complet) p.complet = false;
     if(s.O === null) continue;
     if(p.O === null) p.O = s.O;
     p.C = s.C;
@@ -137,14 +153,18 @@ function regroupe(J, cleDe){
 // la periode en cours ne dependent pas de ses propres barres : ils ne se
 // recalculent qu'a chaque nouvelle barre ou changement de formule.
 function calcul(g, r){
-  var J = seances(SEANCES, g, !!r.rth && g.seance === 'eth');
-  var cle = SEANCES.sig + '|' + SEANCES.n + '|' + r.formule;
+  var rth = !!r.rth && g.seance === 'eth', J = seances(SEANCES, g, rth);
+  var cle = SEANCES.sig + '|' + SEANCES.gen + '|' + SEANCES.n + '|' + r.formule;
   if(cle === CACHE.cle) return CACHE.P;
+  var f = rth ? RTH : [0, DUREE[g.seance] || DUREE.eth];
+  for(var j = 0; j < J.length; j++) J[j].complet = complete(J[j], f);
   var P = {jour:J, sem:regroupe(J, semaine), mois:regroupe(J, function(d){ return d.slice(0, 7); })};
-  // La premiere periode chargee n'est complete que si elle s'ouvre au premier jour ouvre.
+  // Une periode precedente incomplete ne donne pas de pivots : seance qui ne
+  // couvre pas sa fenetre, semaine ou mois qui en contient une, ou qui ne
+  // s'ouvre pas a son premier jour ouvre.
   for(var T in P) for(var k = 0; k < P[T].length; k++){
     var a = P[T][k - 1];
-    P[T][k].niv = !a || a.O === null || (T !== 'jour' && k === 1 && !premierOuvre(T, a.debut)) ? null : niveaux(r.formule, a.H, a.L, a.C, a.O);
+    P[T][k].niv = !a || a.O === null || !a.complet || (T !== 'jour' && k === 1 && !premierOuvre(T, a.debut)) ? null : niveaux(r.formule, a.H, a.L, a.C, a.O);
   }
   CACHE.cle = cle; CACHE.P = P;
   return P;
@@ -167,7 +187,7 @@ var def = {
     {k:'etiq', label:'Étiquettes', type:'check', defaut:true}
   ].concat(sousSection('jour', 'Pivots journaliers', '#5aa9e6'), sousSection('sem', 'Pivots hebdomadaires', '#ffb347'), sousSection('mois', 'Pivots mensuels', '#e0567f')),
   calcul:calcul,
-  outils:{niveaux:niveaux, premierOuvre:premierOuvre, semaine:semaine},
+  outils:{niveaux:niveaux, premierOuvre:premierOuvre, semaine:semaine, complete:complete},
   dessine:function(g, r){
     var P = calcul(g, r), F = g.cadre, e = g.echelle || 1;
     var deb = Math.max(0, g.premiere | 0), fin = Math.min(g.derniere | 0, (g.n | 0) - 1);
