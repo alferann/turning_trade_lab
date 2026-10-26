@@ -6,7 +6,7 @@
 
 ## En deux mots
 
-Le profil de volume de la séance du graphe, de la séance US (RTH), Asie ou Europe, de la semaine ou du mois, sur le graphe en bougies ou le footprint. Chaque rangée montre les acheteurs et les vendeurs bout à bout, ou le volume total coloré par l'aire de valeur. Le POC et les bornes de l'aire de valeur (VAH, VAL) sont tracés en lignes, leur prix écrit à gauche. La période en cours se colle au bord droit ou se pose sur ses barres ; les périodes précédentes se posent sur les leurs. Quatre instances (A à D) permettent de superposer plusieurs profils, par exemple la séance, la semaine et le mois.
+Le profil de volume de la séance du graphe, de la séance US (RTH), Asie ou Europe, de la semaine ou du mois, sur le graphe en bougies ou le footprint. Chaque rangée montre les acheteurs et les vendeurs bout à bout, plus pâles hors de l'aire de valeur, ou le volume total coloré par l'aire de valeur. Le POC et les bornes de l'aire de valeur (VAH, VAL) sont tracés en lignes, leur prix écrit à gauche. La période en cours se colle au bord droit ou se pose sur ses barres ; les périodes précédentes se posent sur les leurs. Quatre instances (A à D) permettent de superposer plusieurs profils, par exemple la séance, la semaine et le mois.
 
 ## Un peu de maths
 
@@ -24,7 +24,7 @@ Ce que ça change pour la décision : comparer la séance du jour à la valeur d
 
 - **Profil en cours** : collé au bord droit (la rangée la plus fournie prend la largeur réglée), ou posé sur les barres de sa période.
 - **Profils précédents** : chacun sur les barres de sa période, adossé à sa première barre et tourné vers la droite, ou adossé à sa clôture et tourné vers le passé. Sa rangée la plus fournie prend une part réglable de la durée de la période.
-- **Rangées empilées** : les acheteurs contre l'adossement (le bord droit, ou le bord de la période), les vendeurs au bout ; la longueur totale est le volume du prix.
+- **Rangées empilées** : les acheteurs contre l'adossement (le bord droit, ou le bord de la période), les vendeurs au bout ; la longueur totale est le volume du prix. Hors de l'aire de valeur, les deux couleurs pâlissent ; la rangée du POC est cerclée de la couleur du POC.
 - **Rangées en volume total** : rangée du POC, rangées de l'aire de valeur et reste, chacune avec sa couleur et son opacité.
 - **Lignes** : POC en trait plein, VAH et VAL en tirets par défaut. Celles de la période en cours vont de son début (ou du bord gauche si elle a commencé hors écran) jusqu'au bord droit ; celles des périodes précédentes s'arrêtent à leur clôture.
 - **Prix à gauche** : « dPOC 6712.25 », « wVAH … », « mVAL … » (séance, semaine, mois), « POC RTH », « VAH Asie », « VAL EU » pour les séances, écrits juste au-dessus de leur ligne, au bord gauche ou au début de la période.
@@ -46,7 +46,9 @@ Ce que ça change pour la décision : comparer la séance du jour à la valeur d
 | **Histogramme** | Affiche ou masque les rangées | cochée |
 | Affichage du volume | Acheteurs et vendeurs empilés, ou total coloré par la Value Area | empilés |
 | Couleur et opacité acheteurs, vendeurs | Mode empilé | vert, rouge, 0,5 |
-| Couleur et opacité hors Value Area, Value Area, rangée POC | Mode total | gris, bleu, orange |
+| Opacité relative hors Value Area | Mode empilé : part de leur opacité que gardent acheteurs et vendeurs hors de l'aire de valeur ; 1 n'atténue rien | 0,4 |
+| Couleur et opacité hors Value Area, Value Area | Mode total | gris, bleu, 0,5 |
+| Couleur et opacité rangée POC | Rangée du POC en mode total, son cadre en mode empilé | orange, 0,6 |
 | **Ligne POC** | Affiche ou masque la ligne ; couleur, style (plein, tirets, pointillés, pointillés fins, tiret-point), épaisseur, opacité | orange, plein, 1,5 |
 | **Lignes VAH et VAL** | Mêmes réglages, communs aux deux lignes | bleu, tirets, 1 |
 | Étiquettes à gauche et légende | Prix des niveaux de la période en cours et légende | cochée |
@@ -70,7 +72,7 @@ Ce que ça change pour la décision : comparer la séance du jour à la valeur d
 
 ## In short
 
-The volume profile of the chart session, the US (RTH), Asian or European session, the week or the month, on the candlestick or footprint chart. Each row shows buyers and sellers end to end, or the total volume coloured by the value area. The POC and the value area bounds (VAH, VAL) are drawn as lines, their price written on the left. The current period is pinned to the right edge or set on its bars; previous periods are set on theirs. Four instances (A to D) let you stack several profiles, for instance the session, the week and the month.
+The volume profile of the chart session, the US (RTH), Asian or European session, the week or the month, on the candlestick or footprint chart. Each row shows buyers and sellers end to end, paler outside the value area, or the total volume coloured by the value area. The POC and the value area bounds (VAH, VAL) are drawn as lines, their price written on the left. The current period is pinned to the right edge or set on its bars; previous periods are set on theirs. Four instances (A to D) let you stack several profiles, for instance the session, the week and the month.
 
 ## A bit of math
 
@@ -88,7 +90,7 @@ What it changes for the decision: comparing today's session with yesterday's, th
 
 - **Current profile**: pinned to the right edge (the fullest row takes the set width), or set on its period's bars.
 - **Previous profiles**: each on its period's bars, backed against its first bar and facing right, or against its close and facing the past. Its fullest row takes an adjustable share of the period's span.
-- **Stacked rows**: buyers against the backing (the right edge, or the period's edge), sellers beyond; the total length is the price's volume.
+- **Stacked rows**: buyers against the backing (the right edge, or the period's edge), sellers beyond; the total length is the price's volume. Outside the value area both colours fade; the POC row is outlined in the POC colour.
 - **Total volume rows**: POC row, value area rows and the rest, each with its colour and opacity.
 - **Lines**: POC solid, VAH and VAL dashed by default. The current period's lines run from its start (or the left edge if it started off screen) to the right edge; previous periods' lines stop at their close.
 - **Prices on the left**: "dPOC 6712.25", "wVAH …", "mVAL …" (session, week, month), "POC RTH", "VAH Asia", "VAL EU" for the sessions, written just above their line, at the left edge or at the start of the period.
@@ -112,7 +114,9 @@ Labels below are those shown when Turning Trade is set to English.
 | **Histogram** | Shows or hides the rows | checked |
 | Volume display | Buyers and sellers stacked, or total colored by the Value Area | stacked |
 | Buyers, sellers color and opacity | Stacked mode | green, red, 0.5 |
-| Color and opacity outside the Value Area, Value Area, POC row | Total mode | grey, blue, orange |
+| Relative opacity outside the Value Area | Stacked mode: share of their opacity buyers and sellers keep outside the value area; 1 fades nothing | 0.4 |
+| Color and opacity outside the Value Area, Value Area | Total mode | grey, blue, 0.5 |
+| POC row color and opacity | POC row in total mode, its outline in stacked mode | orange, 0.6 |
 | **POC line** | Shows or hides the line; color, style (solid, dashed, dotted, fine dots, dash-dot), thickness, opacity | orange, solid, 1.5 |
 | **VAH and VAL lines** | Same settings, shared by both lines | blue, dashed, 1 |
 | Left labels and caption | Prices of the current period's levels and caption | checked |

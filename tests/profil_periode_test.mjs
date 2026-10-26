@@ -30,8 +30,9 @@ const avec = o => Object.assign({}, defaut, o);
 const niveaux = b => { const lv = b && b.lv || []; return { n: lv.length, prix: k => lv[k][0], bid: k => lv[k][1] || 0, ask: k => lv[k][2] || 0,
   volume: () => lv.reduce((s, l) => s + (l[1] || 0) + (l[2] || 0), 0) }; };
 const rec = [];
-const ctx = { set fillStyle(c) { this._c = c; }, set globalAlpha(a) { this._a = a; }, beginPath() { this._p = []; },
-  rect(x, y, w, h) { this._p.push({ x, y, w, h }); }, fill() { for (const r of this._p) rec.push(Object.assign({ k: 'rect', c: this._c, a: this._a }, r)); } };
+const ctx = { set fillStyle(c) { this._c = c; }, set strokeStyle(c) { this._s = c; }, set lineWidth(l) { this._l = l; }, set globalAlpha(a) { this._a = a; }, beginPath() { this._p = []; },
+  rect(x, y, w, h) { this._p.push({ x, y, w, h }); }, fill() { for (const r of this._p) rec.push(Object.assign({ k: 'rect', c: this._c, a: this._a }, r)); },
+  stroke() { for (const r of this._p) rec.push(Object.assign({ k: 'cadre', c: this._s, a: this._a, l: this._l }, r)); } };
 let syms = 0;
 // Each call gets its own symbol unless one is given, so caches never leak between checks. One bar per pixel.
 const g = (B = bars, o = {}) => Object.assign({ n: B.length, premiere: B.length - 300, derniere: B.length - 1, tick: 0.25, seance: 'eth', sym: 'T' + syms++, tf: 1, echelle: 1,
@@ -203,16 +204,25 @@ const synth = (dates, m0 = 0) => dates.flatMap((date, s) => [0, 1, 2].map(k => {
 const POINTS = { plein: null, tirets: [6, 4], points: [2, 3] };
 {
   const B = synth(jours('2026-10-12', '2026-10-14')), G = g(B, { premiere: 0 });
-  const dessin = (r, G2 = G, D = E) => { rec.length = 0; D.dessine(G2, r); return { rects: rec.filter(x => x.k === 'rect'), traits: rec.filter(x => x.k === 'trait'), textes: rec.filter(x => x.k === 'texte') }; };
+  const dessin = (r, G2 = G, D = E) => { rec.length = 0; D.dessine(G2, r); return { rects: rec.filter(x => x.k === 'rect'), cadres: rec.filter(x => x.k === 'cadre'), traits: rec.filter(x => x.k === 'trait'), textes: rec.filter(x => x.k === 'texte') }; };
   const proche = (a, b) => Math.abs(a - b) < 1e-9;
 
   // Stacked at the right edge: buyers against the edge, sellers beyond; the fullest row takes 25 %.
+  // Outside the value area both fade to `horsVA` of their opacity; the POC row is outlined.
   let r = avec({ rangee: 1, periode: 'sem' }), R = cour(G, r), D = dessin(r);
   const achat = D.rects.filter(x => x.c === r.achatC), vente = D.rects.filter(x => x.c === r.venteC);
+  const tickDe = x => Math.round(x.y / 0.25 + 0.5), dansVA = x => tickDe(x) >= R.val && tickDe(x) <= R.vah;
   assert.equal(achat.length, R.ticks.length, 'une rangée par tick');
-  assert.ok(achat.every(x => proche(x.x + x.w, 1000) && x.a === r.achatO), 'acheteurs contre le bord droit');
-  assert.ok(vente.every(x => x.a === r.venteO && proche(x.x + x.w, achat.find(y => y.y === x.y).x)), 'vendeurs au bout');
+  assert.ok(achat.every(x => proche(x.x + x.w, 1000)), 'acheteurs contre le bord droit');
+  assert.ok(vente.every(x => proche(x.x + x.w, achat.find(y => y.y === x.y).x)), 'vendeurs au bout');
+  assert.ok(achat.some(x => !dansVA(x)), 'des rangées hors VA');
+  assert.ok(achat.every(x => proche(x.a, dansVA(x) ? r.achatO : r.achatO * r.horsVA)), 'acheteurs atténués hors VA');
+  assert.ok(vente.every(x => proche(x.a, dansVA(x) ? r.venteO : r.venteO * r.horsVA)), 'vendeurs atténués hors VA');
   const k0 = R.ticks.indexOf(R.poc), rangeeDe = t => achat.find(x => proche(x.y, (t - 0.5) * 0.25));
+  assert.equal(D.cadres.length, 1, 'un seul cadre');
+  assert.deepEqual([D.cadres[0].c, D.cadres[0].a, D.cadres[0].l, tickDe(D.cadres[0])], [r.pocC, r.pocO, 1, R.poc], 'rangée du POC cerclée');
+  assert.ok(proche(D.cadres[0].x, rangeeDe(R.poc).x - vente.find(y => y.y === rangeeDe(R.poc).y).w) && proche(D.cadres[0].x + D.cadres[0].w, 1000), 'cadre sur toute la rangée');
+  assert.ok(dessin(avec({ rangee: 1, periode: 'sem', horsVA: 1 })).rects.every(x => x.a === (x.c === r.achatC ? r.achatO : r.venteO)), 'horsVA 1 : pas d\'atténuation');
   assert.ok(proche(rangeeDe(R.poc).w, 250 * R.ask[k0] / Math.max(...R.ticks.map((t, k) => R.bid[k] + R.ask[k]))), 'largeur des acheteurs');
   assert.ok(proche(Math.max(...achat.map(x => x.w + vente.find(y => y.y === x.y).w)), 250), '25 % de la largeur du cadre');
 
@@ -224,6 +234,7 @@ const POINTS = { plein: null, tirets: [6, 4], points: [2, 3] };
   const hors = R.ticks.find(t => t > R.vah || t < R.val);
   assert.deepEqual([deTick(hors).c, deTick(hors).a], [r.couleur, r.opac], 'rangée hors VA');
   assert.ok(D.rects.every(x => proche(x.x + x.w, 1000)), 'collées au bord droit');
+  assert.deepEqual(D.cadres, [], 'pas de cadre en mode total');
 
   // Lines from the start of the week to the right edge, styles from the settings; prices above them on the left.
   r = avec({ periode: 'sem', vaLT: 'points', vaLO: 0.4, pocLE: 3 }); D = dessin(r);
