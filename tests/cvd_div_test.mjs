@@ -219,30 +219,35 @@ function tapeReelle(sym, date) {
   return { cs, sz, sd };
 }
 {
-  // Last session of the archive against its recorded tape, all sessions on the chart: only
-  // the tape day gets wicks, and exactly where the per-minute tape delta equals the levels.
-  const date = bars[N - 1]._date, R = tapeReelle('ES', date);
-  if (!R) console.warn('pas d\'enregistrement de tape, mèches réelles sautées :', date);
-  else {
-    ({ prix, cvd } = charger()); surch = {};
-    const parMin = new Map();
+  // The last archived session whose recorded tape covers more than 50 minutes (the current one may have
+  // just opened), the chart cut after it: only that day gets wicks, exactly where the per-minute tape delta
+  // equals the levels.
+  const prevues = s => {
+    const R = tapeReelle('ES', s.date);
+    if (!R) return null;
+    const B = bars.slice(0, bars.findIndex(b => b._date === s.date) + s.bars.length), parMin = new Map(), attendu = {};
     for (let k = 0; k < R.cs.length; k++) {
       const m = Math.floor(R.cs[k] / 6000), e = parMin.get(m) || { run: 0, h: 0, l: 0 };
       e.run += R.sd[k] === 1 ? R.sz[k] : -R.sz[k]; e.h = Math.max(e.h, e.run); e.l = Math.min(e.l, e.run); parMin.set(m, e);
     }
-    const M = meches(bars, ruban(R.cs, R.sz, R.sd), {}, 300);
-    const attendu = {};
     let cum = 0, cle = null;
-    for (let i = 0; i < N; i++) {
-      const b = bars[i], k = b._date + (b.m >= 930 ? 'R' : ''), dl = J(b.lv).deltaTotal();
+    for (let i = 0; i < B.length; i++) {
+      const b = B[i], k = b._date + (b.m >= 930 ? 'R' : ''), dl = J(b.lv).deltaTotal();
       if (k !== cle) { cum = 0; cle = k; }
-      const e = b._date === date && parMin.get(b.m);
+      const e = b._date === s.date && parMin.get(b.m);
       if (i >= 300 && e && e.run === dl) attendu[i] = [cum + e.l, cum + e.h];
       cum += dl;
     }
-    assert.ok(Object.keys(attendu).length > 50, 'des minutes couvertes par la tape');
-    assert.deepEqual(M, attendu, 'mèches = extrêmes du delta cumulé de la tape, minute par minute');
-    console.log('  mèches ES', date, ':', Object.keys(M).length, 'barres sur', bars.filter(b => b._date === date).length, 'de la séance');
+    return Object.keys(attendu).length > 50 ? { date: s.date, R, B, attendu } : null;
+  };
+  let T = null;
+  for (let k = db.sessions.length - 1; k >= 0 && !T; k--) T = prevues(db.sessions[k]);
+  if (!T) console.warn('pas de tape enregistrée sur plus de 50 minutes, mèches réelles sautées');
+  else {
+    ({ prix, cvd } = charger()); surch = {};
+    const M = meches(T.B, ruban(T.R.cs, T.R.sz, T.R.sd), {}, 300);
+    assert.deepEqual(M, T.attendu, 'mèches = extrêmes du delta cumulé de la tape, minute par minute');
+    console.log('  mèches ES', T.date, ':', Object.keys(M).length, 'barres sur', T.B.filter(b => b._date === T.date).length, 'de la séance');
   }
   // Budget on the busiest recorded session, all of it visible: cold pass over the whole tape, then warm.
   const date2 = '2026-10-16', R2 = tapeReelle('ES', date2);
