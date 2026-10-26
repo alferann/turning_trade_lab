@@ -107,6 +107,17 @@ const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a 
   proche(C2.vwap[N - 2], brute(cur.bars.slice(0, -1)).vwap, 'barre précédente intacte');
 }
 
+// 6b. Bars inserted before the last one read (tick history filling a missing day): the cache starts over
+// and gives what a fresh computation gives, whatever the anchor.
+{
+  const trou = bars.filter(b => b._date !== db.sessions[1].date), sur = (B, sym) => Object.assign(g(B), { sym });
+  for (const anc of ['jour', 'us', 'sem']) {
+    A.calcul(sur(trou, 'INS'), avec({ anc }));
+    const ins = Array.from(A.calcul(sur(bars, 'INS'), avec({ anc })).vwap.subarray(0, N));
+    assert.deepEqual(ins, Array.from(defs[1].calcul(sur(bars, 'NEUF'), avec({ anc })).vwap.subarray(0, N)), anc + ' : insertion = calcul complet');
+  }
+}
+
 // 7. Footprint-like bars without _date: sessions are split where m falls back.
 {
   const sans = bars.map(b => { const c = Object.assign({}, b); delete c._date; return c; });

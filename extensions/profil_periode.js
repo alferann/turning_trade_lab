@@ -33,7 +33,7 @@ var POINTILLE = {plein:null, tirets:[6,4], points:[2,3], fins:[1,3], mixte:[8,3,
 // Filet des titres de sous-section, le panneau n'en ayant pas.
 var FILET = ' ────────────────────';
 // ponytail: `cout` part de 3 ms, une seance ETH d'une minute lue a froid, pour que la premiere lecture ne suive pas le balayage des barres ; ensuite le cout mesure de la derniere lecture.
-var ETAT = {sig:'', gen:0, n:0, J:[], prev:null, H:{}, O:{}, cout:3};
+var ETAT = {sig:'', gen:0, n:0, der:'', J:[], prev:null, H:{}, O:{}, cout:3};
 // Seances closes lues pendant l'image en cours.
 var LUES = 0;
 
@@ -103,6 +103,8 @@ function semaine(cle){
 }
 function mois(cle){ return String(cle).slice(0, 7); }
 function aujourdhui(){ return new Date().toISOString().slice(0, 10); }
+// Cle d'une barre, pour reconnaitre la derniere lue a son index.
+function cleBarre(b){ return b ? (b._date || '') + ':' + b.m : ''; }
 function maintenant(){ return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now(); }
 function redessiner(){
   try{ if(typeof setTimeout !== 'undefined' && HFQExt.redessiner) setTimeout(function(){ HFQExt.redessiner(); }, 0); }catch(_){}
@@ -180,13 +182,15 @@ function touche(f, s){ return !f || (s.m0 < f[1] && s.m1 >= f[0]) || (s.m0 < f[1
 // Seances du graphe, barre et minute de debut et de fin. Incremental : si le
 // graphe a seulement grandi, seules les nouvelles barres sont lues ; s'il a
 // raccourci (replay ramene en arriere), les seances au-dela de sa fin sont
-// coupees. La lecture s'arrete passee l'echeance `fin` et reprend a l'appel
+// coupees. S'il a grandi mais que la derniere barre lue n'est plus a son
+// index (barres inserees plus tot, comme l'historique en ticks qui se
+// remplit), tout repart de zero. La lecture s'arrete passee l'echeance `fin` et reprend a l'appel
 // suivant. `gen` change a chaque remise a zero ou coupe, et vide les caches
 // des instances.
 function seances(S, g, fin){
   var n = g.n | 0, b0 = n ? g.barre(0) : null, b, c;
   var sig = [g.sym, g.tf, g.seance, g.tick, b0 ? (b0._date || '') + ':' + b0.m : ''].join('|');
-  if(sig !== S.sig){ S.sig = sig; S.gen++; S.n = 0; S.J = []; S.prev = null; S.H = {}; S.O = {}; }
+  if(sig !== S.sig || (S.n && n >= S.n && cleBarre(g.barre(S.n - 1)) !== S.der)){ S.sig = sig; S.gen++; S.n = 0; S.J = []; S.prev = null; S.H = {}; S.O = {}; }
   var J = S.J;
   if(n < S.n){
     while(J.length && J[J.length - 1].deb >= n) J.pop();
@@ -204,7 +208,7 @@ function seances(S, g, fin){
     c = J[J.length - 1]; c.fin = i; c.m1 = +b.m;
     prev = b;
   }
-  S.n = i; S.prev = prev;
+  S.n = i; S.prev = prev; S.der = cleBarre(prev);
   return J;
 }
 

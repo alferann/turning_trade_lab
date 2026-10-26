@@ -191,6 +191,17 @@ const lu = notes => notes.map(t => { const m = /^ES · (.+) ([HL]) \| .+ : ([\d.
   for (const id in frais.D) assert.deepEqual(resume(R.D[id]), resume(frais.D[id]), 'retour arrière ' + id);
 }
 
+// 7b. Bars inserted before the last one read (tick history filling a missing day): the state starts over,
+// silently, and ends as a fresh pass.
+{
+  const { E: T, notes } = charge(), r = avec({ alerte: 'meche' });
+  plein(T, g(bars.filter(b => b._date !== db.sessions[1].date)), r);
+  const R = plein(T, g(), r);
+  assert.deepEqual(Object.keys(R.D).sort(), Object.keys(P.D).sort(), 'insertion : mêmes sessions');
+  for (const id in P.D) assert.deepEqual(resume(R.D[id]), resume(P.D[id]), 'insertion ' + id);
+  assert.equal(notes.length, 0, 'insertion muette');
+}
+
 // 8. Drawing: from the extreme bar to the touch chosen, or to the right edge; a session
 // unchecked is not drawn; labels name the session.
 {

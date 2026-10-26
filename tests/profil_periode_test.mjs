@@ -203,6 +203,15 @@ const synth = (dates, m0 = 0) => dates.flatMap((date, s) => [0, 1, 2].map(k => {
   assert.deepEqual(complet(g(B.slice(6), { premiere: 0 }), avec({ periode: 'sem', hist: 2 })).prec.map(R => R.cle), ['41'], 'semaine 40 partielle omise');
 }
 
+// 9b. Bars inserted before the last one read (tick history filling a missing day): the shared session
+// state starts over and the profiles are those of a fresh computation.
+{
+  const trou = bars.filter(b => b._date !== db.sessions[1].date), r = avec({ periode: 'jour', hist: 4 });
+  const X = B => complet(g(B, { sym: 'INS', premiere: 0 }), r), vu = R => [resume(R.cour)].concat(R.prec.map(resume));
+  X(trou);
+  assert.deepEqual(vu(X(bars)), vu(complet(g(bars, { premiere: 0 }), r)), 'insertion = calcul complet');
+}
+
 // 10. Drawing.
 const POINTS = { plein: null, tirets: [6, 4], points: [2, 3] };
 {
