@@ -34,7 +34,11 @@ var THEMES = {
   mono:  {vwap:'#ffffff', sd:['#d0d4da','#aab0b8','#848c96','#5f6873','#4a525c','#3a414a']}
 };
 var POINTILLE = {plein:null, tirets:[6,4], points:[2,3], fins:[1,3], mixte:[8,3,2,3]};
-var NOMS = {jour:'DVWAP', sem:'wVWAP', mois:'mVWAP', us:'VWAP RTH', asie:'VWAP Asie', eu:'VWAP EU'};
+// ponytail: budget du calcul a froid par image (demarrage, reglage, symbole) ; la suite aux images suivantes.
+var BUDGET_MS = 4;
+// ponytail: au zoom arriere, un point tous les PX_POINT pixels ; VWAP et bandes sont assez lisses pour que l'oeil n'y voie rien.
+var PX_POINT = 2;
+var NOMS ={jour:'DVWAP', sem:'wVWAP', mois:'mVWAP', us:'VWAP RTH', asie:'VWAP Asie', eu:'VWAP EU'};
 
 var ANCRES = [['jour','Journalier (séance du graphe)'],['us','Séance US (RTH)'],['asie','Séance Asie'],['eu','Séance Europe'],['sem','Hebdomadaire (semaine ISO)'],['mois','Mensuel']];
 var STYLES = [['plein','Plein'],['tirets','Tirets'],['points','Pointillés'],['fins','Pointillés fins'],['mixte','Tiret-point']];
@@ -150,6 +154,10 @@ function semaine(cle){
 }
 
 function aujourdhui(){ return new Date().toISOString().slice(0, 10); }
+function maintenant(){ return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now(); }
+function redessiner(){
+  try{ if(typeof setTimeout !== 'undefined' && HFQExt.redessiner) setTimeout(function(){ HFQExt.redessiner(); }, 0); }catch(_){}
+}
 
 function cache(){ return {sig:'', id0:'', n:0, fen:{}, cle:[], sessAt:new Int32Array(0), V:new Float64Array(0), PV:new Float64Array(0), PV2:new Float64Array(0), vwap:new Float64Array(0), sd:new Float64Array(0)}; }
 
@@ -162,8 +170,10 @@ function agrandir(C, n){
 
 // Sommes cumulees par ancrage, barre par barre. Incremental : si le graphe a
 // seulement grandi depuis le dernier appel, seules la derniere barre connue
-// (qui a pu grossir) et les nouvelles sont recalculees.
-function calcul(C, g, r){
+// (qui a pu grossir) et les nouvelles sont recalculees. Passee l'echeance
+// `fin`, la lecture s'arrete et C.n dit jusqu'ou elle est allee : l'appel
+// suivant reprend la, par le meme chemin incremental.
+function calcul(C, g, r, fin){
   var n = g.n | 0, b0 = n ? g.barre(0) : null;
   var sig = [g.sym, g.tf, g.seance, r.anc, r.deb, r.fin, r.tz, r.src].join('|');
   var id0 = b0 ? (b0._date || '') + ':' + b0.m : '';
@@ -174,6 +184,7 @@ function calcul(C, g, r){
   var prev = depuis > 0 ? g.barre(depuis - 1) : null;
   var sess = depuis > 0 ? C.sessAt[depuis - 1] : 0;
   for(var i = depuis; i < n; i++){
+    if(fin && !(i & 255) && i > depuis && maintenant() > fin) break;
     var b = g.barre(i);
     if(!b){ C.cle[i] = null; C.vwap[i] = NaN; C.sd[i] = NaN; C.sessAt[i] = sess; C.V[i] = 0; continue; }
     if(prev && (b._date != null ? String(b._date) !== String(prev._date) : +b.m < +prev.m)) sess++;
@@ -208,7 +219,7 @@ function calcul(C, g, r){
     } else { C.vwap[i] = NaN; C.sd[i] = NaN; }
     prev = b;
   }
-  C.n = n; C.sig = sig; C.id0 = id0;
+  C.n = i; C.sig = sig; C.id0 = id0;
   return C;
 }
 
@@ -273,11 +284,16 @@ function instance(lettre, d){
     calcul:function(g, r){ return calcul(C, g, r); },
     outils:{versET:versET, bornesET:bornesET, semaine:semaine},
     dessine:function(g, r){
-      calcul(C, g, r);
+      // Rien n'est dessine tant que le calcul a froid n'a pas rattrape le graphe.
+      calcul(C, g, r, maintenant() + BUDGET_MS);
+      if(C.n < (g.n | 0)){ redessiner(); return; }
       var n = C.n, deb = Math.max(0, g.premiere | 0), fin = Math.min(g.derniere | 0, n - 1), i, j, k;
       if(fin < deb) return;
       var seule = null;
       if(r.hist === 'cour') for(i = n - 1; i >= 0 && !seule; i--) seule = C.cle[i];
+      var trace = function(i){ return isFinite(C.vwap[i]) && !(seule && C.cle[i] !== seule); };
+      // Barres par point, sur des multiples du pas pour que les points ne bougent pas au defilement.
+      var pas = Math.max(1, Math.floor(PX_POINT * (g.echelle || 1) / Math.max(Math.abs(g.x(deb + 1) - g.x(deb)), 1e-9)));
       var paliers = [];
       for(k = 1; k <= NSD; k++){ var mult = +r['sd' + k]; if(r['on' + k] && mult > 0) paliers.push({k:k, mult:mult}); }
       paliers.sort(function(a, b){ return a.mult - b.mult; });
@@ -287,11 +303,13 @@ function instance(lettre, d){
       for(j = 0; j < paliers.length; j++){ Hs.push([]); Bs.push([]); }
       for(i = deb; i <= fin; i++){
         var vw = C.vwap[i];
-        if(!isFinite(vw) || (seule && C.cle[i] !== seule)){
+        if(!trace(i)){
           P0.push(null);
           for(j = 0; j < paliers.length; j++){ Hs[j].push(null); Bs[j].push(null); }
           continue;
         }
+        // Les deux bouts de chaque troncon et de chaque periode restent, et la derniere barre.
+        if(i % pas && i < fin && trace(i - 1) && trace(i + 1) && C.cle[i - 1] === C.cle[i] && C.cle[i + 1] === C.cle[i]) continue;
         var x = g.x(i), sd = C.sd[i];
         P0.push([x, g.y(vw)]);
         for(j = 0; j < paliers.length; j++){ var e = paliers[j].mult * sd; Hs[j].push([x, g.y(vw + e)]); Bs[j].push([x, g.y(vw - e)]); }

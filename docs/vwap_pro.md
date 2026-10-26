@@ -59,6 +59,8 @@ Les mêmes réglages existent sur les six instances ; seuls l'ancrage et le thè
 - Le footprint ne date pas ses barres : l'hebdomadaire et le mensuel y retombent sur la séance affichée, et les heures de séance sont lues à la date du jour.
 - Une fenêtre de séance qui enjambe l'ouverture du graphe (par exemple 17:00 → 18:30 New York sur un graphe ETH) est coupée à l'ouverture.
 - Les offsets d'heure d'été sont calculés à midi de la date de la séance : le jour exact d'un changement d'heure, la fenêtre peut être décalée d'une heure sur les barres du soir.
+- **Premier affichage** d'un long historique, ou après un changement de réglage : le calcul s'étale sur quelques images pour ne pas figer le graphe, les traits apparaissent une fraction de seconde après le reste.
+- **Zoom arrière** : au-delà d'une barre par pixel, les traits ne gardent qu'un point tous les deux pixels. C'est invisible à l'œil, et c'est ce qui permet de tracer six paliers sans dépasser les 8 ms par image au-delà desquelles Turning Trade suspend une étude.
 
 ---
 
@@ -121,3 +123,5 @@ The same settings exist on all six instances; only the default anchor and theme 
 - The footprint does not date its bars: weekly and monthly fall back to the displayed session there, and session hours are read at today's date.
 - A session window that straddles the chart's open (for instance 17:00 → 18:30 New York on an ETH chart) is cut at the open.
 - Daylight-saving offsets are computed at noon of the session date: on the exact day of a clock change, the window may be off by one hour on the evening bars.
+- **First display** of a long history, or after a settings change: the computation spreads over a few frames so the chart does not freeze, the lines show a split second after the rest.
+- **Zoomed out**: beyond one bar per pixel, the lines keep one point every two pixels. The eye cannot tell, and it is what lets six levels draw within the 8 ms per frame beyond which Turning Trade suspends a study.

@@ -28,8 +28,11 @@ const avec = o => Object.assign({}, defaut, o);
 const rec = [];
 const ctx = { save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, fill() { rec.push({ k: 'fill', col: this.fillStyle, op: this.globalAlpha }); } };
 const g = (B = bars, seance = 'eth', premiere = B.length - 300) => ({ n: B.length, premiere, derniere: B.length - 1, tick, seance, sym: 'ES', tf: 1, echelle: 1, ctx,
-  cadre: { gauche: 0, droite: 1000, haut: 0, bas: 500 }, barre: i => B[i] || null, niveaux: i => J(B[i] && B[i].lv), x: i => i, y: v => v,
+  cadre: { gauche: 0, droite: 1000, haut: 0, bas: 500 }, barre: i => B[i] || null, niveaux: i => J(B[i] && B[i].lv), x: i => 2 * i, y: v => v,
   trait(p, o) { rec.push({ k: 'trait', p, o }); }, etiquette(p, o) { rec.push({ k: 'etiq', p, o }); }, ligne() {}, zone() {}, texte() {} });
+
+// The study draws nothing until its cold compute has caught up with the chart: compute it all first.
+const dessine = (G, r) => { A.calcul(G, r); rec.length = 0; A.dessine(G, r); };
 
 // Brute-force VWAP and σ from the per-price volume of a set of bars.
 const brute = bs => { let sv = 0, spv = 0, spv2 = 0; for (const b of bs) for (const [p, bid, ask] of b.lv) { const v = bid + ask; sv += v; spv += p * v; spv2 += p * p * v; } const vwap = spv / sv; return { vwap, sd: Math.sqrt(spv2 / sv - vwap * vwap) }; };
@@ -111,7 +114,7 @@ const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a 
 
 // 8. Drawing: one trait per line (VWAP + 2 per active level), one inner band per level with opacity > 0, labels.
 {
-  rec.length = 0; A.dessine(g(), defaut);
+  dessine(g(), defaut);
   const traits = rec.filter(x => x.k === 'trait');
   assert.equal(traits.length, 1 + 2 * 3, 'VWAP et trois paliers par défaut');
   assert.deepEqual(rec.filter(x => x.k === 'fill').map(x => x.op), [defaut.f1, defaut.f1, defaut.f2, defaut.f2, defaut.f3, defaut.f3], 'bandes intérieures, opacité de chaque palier');
@@ -123,7 +126,7 @@ const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a 
   assert.ok(sd1 && sd1.o.pointille && sd1.o.pointille.length === 2, 'σ1 en tirets, couleur perso');
 
   const six = { on4: true, on5: true, on6: true, sd4: 2.5, sd5: 3.9, sd6: 0.5, f4: 0.1, f5: 0.1, f6: 0.1 };
-  rec.length = 0; A.dessine(g(), avec({ ...six, theme: 'neon', etiq: 'tous', t1: 'plein' }));
+  dessine(g(), avec({ ...six, theme: 'neon', etiq: 'tous', t1: 'plein' }));
   const T = rec.filter(x => x.k === 'trait');
   assert.equal(T.length, 1 + 2 * 6, 'six paliers');
   assert.equal(rec.filter(x => x.k === 'fill').length, 2 * 6, 'remplissages');
@@ -132,18 +135,18 @@ const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a 
   assert.ok(T.some(t => t.o.couleur === '#00f0ff' && t.o.pointille === null), 'σ1 néon, plein');
 
   // Only the band between σ4 and σ5 is filled: it belongs to σ5, the outer level.
-  rec.length = 0; A.dessine(g(), avec({ on4: true, on5: true, f1: 0, f2: 0, f3: 0, f4: 0, f5: 0.2 }));
+  dessine(g(), avec({ on4: true, on5: true, f1: 0, f2: 0, f3: 0, f4: 0, f5: 0.2 }));
   assert.deepEqual(rec.filter(x => x.k === 'fill').map(x => [x.col, x.op]), [[defaut.c5, 0.2], [defaut.c5, 0.2]], 'bande σ4 → σ5 seule');
 
-  rec.length = 0; A.dessine(g(), avec({ on2: false, sd3: 0 }));
+  dessine(g(), avec({ on2: false, sd3: 0 }));
   assert.equal(rec.filter(x => x.k === 'trait').length, 3, 'case décochée ou multiplicateur nul : palier éteint');
   assert.equal(rec.filter(x => x.k === 'fill').length, 2, 'seule la bande de σ1');
-  rec.length = 0; A.dessine(g(), avec({ vwapOn: false }));
+  dessine(g(), avec({ vwapOn: false }));
   assert.equal(rec.filter(x => x.k === 'trait').length, 2 * 3, 'VWAP masqué, bandes gardées');
   assert.equal(rec.filter(x => x.k === 'etiq').length, 0, 'pas d\'étiquette sans le trait');
 
   // Unsorted multipliers are filled from the inside out: the band 1σ→2.5σ takes the colour of the 2.5σ slot.
-  rec.length = 0; A.dessine(g(), avec({ sd1: 2.5, sd2: 1, on3: false, f1: 0.1, f2: 0.1 }));
+  dessine(g(), avec({ sd1: 2.5, sd2: 1, on3: false, f1: 0.1, f2: 0.1 }));
   const fills = rec.filter(x => x.k === 'fill');
   assert.deepEqual(fills.map(f => f.col), [defaut.c2, defaut.c2, defaut.c1, defaut.c1], 'paliers triés par multiplicateur');
 
@@ -154,19 +157,36 @@ const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a 
 
 // 9. Current period only: the view spans two sessions, only the last one is drawn.
 {
-  rec.length = 0; A.dessine(g(bars, 'eth', iCur - 200), avec({ hist: 'cour' }));
+  dessine(g(bars, 'eth', iCur - 200), avec({ hist: 'cour' }));
   const vwap = rec.filter(x => x.k === 'trait').pop();
   assert.equal(vwap.p.filter(Boolean).length, cur.bars.length, 'séance en cours seule');
-  rec.length = 0; A.dessine(g(bars, 'eth', iCur - 200), defaut);
+  dessine(g(bars, 'eth', iCur - 200), defaut);
   assert.equal(rec.filter(x => x.k === 'trait').pop().p.filter(Boolean).length, cur.bars.length + 200, 'tout l\'historique');
 }
 
-// 10. Budget: cold compute on a fresh signature, then cached frames.
+// 10. Zoomed out, four bars per pixel: one point every 2 px, on multiples of the step, with the ends of each run
+// and the last bar; the kept points are those of the full-resolution line.
+{
+  dessine(g(), defaut); const plein = new Map(rec.filter(x => x.k === 'trait').pop().p.filter(Boolean).map(([x, y]) => [x / 2, y]));
+  dessine(Object.assign(g(), { x: i => i / 4 }), defaut); const reduit = rec.filter(x => x.k === 'trait').pop().p.filter(Boolean);
+  assert.ok(reduit.length < plein.size / 6, 'un point toutes les huit barres : ' + reduit.length + ' sur ' + plein.size);
+  assert.ok(reduit.every(([x, y]) => plein.get(4 * x) === y), 'points du trait complet');
+  assert.equal(reduit.at(-1)[0], (N - 1) / 4, 'dernière barre gardée');
+  dessine(Object.assign(g(bars, 'eth', iCur - 200), { x: i => i / 4 }), avec({ hist: 'cour' }));
+  assert.equal(rec.filter(x => x.k === 'trait').pop().p.find(Boolean)[0], iCur / 4, 'première barre de la séance gardée');
+}
+
+// 11. Budget: the cold compute spans several frames, never three in a row over 8 ms (TT's suspension rule, so a
+// lone GC pause does not fail the bench); then cached frames.
 {
   const G = g(), r = avec({ anc: 'eu' });
-  const t0 = performance.now(); A.dessine(G, r); const froid = performance.now() - t0;
+  let images = 0, froid = 0, lents = 0, suspendue = false;
+  do {
+    rec.length = 0; const t = performance.now(); A.dessine(G, r); const ms = performance.now() - t;
+    froid = Math.max(froid, ms); lents = ms > 8 ? lents + 1 : 0; suspendue ||= lents >= 3; images++;
+  } while (!rec.length && images < 100);
   const t1 = performance.now(); for (let k = 0; k < 50; k++) A.dessine(G, r); const chaud = (performance.now() - t1) / 50;
-  assert.ok(froid < 8 && chaud < 1, 'budget 8 ms, mesuré froid ' + froid.toFixed(2) + ' chaud ' + chaud.toFixed(3));
+  assert.ok(!suspendue && images > 1 && chaud < 1, 'budget 8 ms, pire image ' + froid.toFixed(2) + ' en ' + images + ' images, chaud ' + chaud.toFixed(3));
   const D = A.calcul(G, defaut);
-  console.log('OK', N, 'barres,', db.sessions.length, 'séances | DVWAP', D.vwap[N - 1].toFixed(2), 'σ', D.sd[N - 1].toFixed(2), '| froid', froid.toFixed(2), 'ms, chaud', chaud.toFixed(3), 'ms');
+  console.log('OK', N, 'barres,', db.sessions.length, 'séances | DVWAP', D.vwap[N - 1].toFixed(2), 'σ', D.sd[N - 1].toFixed(2), '| froid', froid.toFixed(2), 'ms en', images, 'images, chaud', chaud.toFixed(3), 'ms');
 }
