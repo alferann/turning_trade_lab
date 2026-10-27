@@ -42,7 +42,7 @@ const defaut = d => Object.fromEntries(d.reglages.map(x => [x.k, x.defaut]));
 
 function g(B, premiere, derniere, rec) {
   return { premiere, derniere, n: B.length, tick: db.tick, seance: 'eth', sym: 'ES', tf: 1, echelle: 1, ctx: null,
-    cadre: { gauche: 0, droite: 1000, haut: 0, bas: 500 },
+    cadre: { gauche: 0, droite: 1e9, haut: 0, bas: 500 },
     barre: i => B[i] || null, niveaux: i => J(B[i] && B[i].lv), x: i => i, y: v => v,
     trait(p, o) { rec.push({ k: 'trait', p, o }); }, texte(x, y, s) { rec.push({ k: 'texte', x, s }); } };
 }
@@ -161,6 +161,18 @@ const tf = performance.now(); prix.dessine(G, rp); const froid = performance.now
 const t0 = performance.now(); for (let k = 0; k < 50; k++) { prix.dessine(G, rp); cvd.dessine(G, rc); }
 const ms = (performance.now() - t0) / 50;
 assert.ok(froid < 8 && ms < 8, 'budget 8 ms, mesuré froid ' + froid.toFixed(2) + ' chaud ' + ms.toFixed(2));
+
+// 10b. Footprint: TT passes the whole history as premiere..derniere. Only the framed bars, one on each side,
+// plus the 300-bar lead for the pivots, are computed, and only they make up the pane's CVD line.
+{
+  ({ prix, cvd } = charger()); surch = {};
+  const rec = [], F = Object.assign(g(bars, 0, N - 1, rec), { x: i => (i - N + 40) * 40 + 20, cadre: { gauche: 0, droite: 1000, haut: 0, bas: 500 } });
+  const rf = defaut(prix), rl = Object.assign(defaut(cvd), { style: 'ligne' });
+  const t = performance.now(); prix.dessine(F, rf); cvd.dessine(F, rl); const fp = performance.now() - t;
+  const ligne = rec.find(x => x.k === 'trait' && x.o.couleur === rl.ccvd).p.filter(p => isFinite(p[0]));
+  assert.deepEqual([ligne.length, ligne[0][0], ligne.at(-1)[0]], [27, -20, 1020], 'footprint : volet sur les barres du cadre, une de chaque côté');
+  assert.ok(fp < 8, 'footprint : deux études à froid ' + fp.toFixed(2) + ' ms');
+}
 
 // 11. Wicks of the CVD pane, read from the tape. Same shape as hfq-ext.js X(): times in
 //     centiseconds since the open, avant(s) = last print at or before s seconds.
