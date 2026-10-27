@@ -38,7 +38,7 @@ Ordres de grandeur mesurés sur quatre séances ETH (13 au 16/10/2026, 1 min, r�
 
 ## Lire le graphe
 
-- **Zones** bleues (haussières) ou orange (baissières), de la barre d'absorption jusqu'à la clôture qui les traverse, ou jusqu'au bord droit tant qu'elles tiennent.
+- **Zones** bleues (haussières) ou orange (baissières), de la barre d'absorption jusqu'à la clôture qui les traverse ou jusqu'à un trou dans les données, ou jusqu'au bord droit tant qu'elles tiennent.
 - **Triangle creux** sous la barre (haussière) ou au-dessus (baissière), avec l'étiquette des signatures et leurs volumes : `ext 386`, `Δ 447`, `niv 1085`, plusieurs séparées par `·` quand elles tombent sur la même barre.
 - **Cercle** au prix exact d'un palier de tape, étiqueté `tape 401`.
 - **Triangle plein « R »** vert (reprise acheteuse) ou rose (vendeuse) sur la barre de reprise, relié en pointillé à son absorption.
@@ -95,7 +95,8 @@ Sans delta ni déséquilibres cochés, la cassure seule suffit ; sans rien de co
 - **Proxy d'iceberg, pas un iceberg.** HFQExt ne donne pas les tailles du carnet : l'étude voit un gros volume exécuté à un prix qui a tenu, pas un ordre qui se recharge au-delà de ce qu'il affichait. Les pastilles iceberg du ladder, qui lisent le carnet, restent la référence.
 - Les déséquilibres sont plus fréquents sur un instrument aux niveaux minces (NQ) : un ask de 3 contre un bid de 0 compte. Pas de volume minimal par niveau.
 - « Ticks de l'extrême » reste en ticks : sur NQ, où une barre d'une minute couvre une quarantaine de ticks, 4 à 8 ticks peuvent mieux convenir.
-- Les seuils démarrent après la moitié de la Mémoire : les 50 premières barres du graphe ne donnent rien.
+- Les seuils démarrent après la moitié de la Mémoire : les 50 premières barres du graphe ne donnent rien. Les barres sans niveaux et le blanc dont TT comble un jour absent n'entrent ni dans les médianes ni dans la détection.
+- **Rien ne tient à travers un trou.** Le blanc dont TT comble un jour absent, ou un jour ouvré manquant entre deux séances chargées (graphe en ticks, footprint), arrête les zones encore ouvertes et les fenêtres de reprise, et efface les tests d'un niveau défendu : on ne sait pas ce que le prix a fait pendant. Les jours fériés ne sont pas connus et comptent comme manquants : le lendemain d'une fermeture complète (Vendredi saint, Noël, Jour de l'an), les zones de la veille s'arrêtent à l'ouverture.
 - La détection attend la clôture : un signal arrive à la clôture de sa barre, jamais pendant (sauf la tape, jugée dès que le prix quitte le palier).
 
 ---
@@ -138,7 +139,7 @@ Orders of magnitude measured on four ETH sessions (Oct 13 to 16, 2026, 1 min, de
 
 ## Reading the chart
 
-- **Zones**, blue (bullish) or orange (bearish), from the absorption bar to the close that crosses them, or to the right edge while they hold.
+- **Zones**, blue (bullish) or orange (bearish), from the absorption bar to the close that crosses them or to a gap in the data, or to the right edge while they hold.
 - **Hollow triangle** below the bar (bullish) or above (bearish), labelled with the signatures and their volumes: `ext 386`, `Δ 447`, `lvl 1085`, several joined by `·` when they fall on the same bar.
 - **Circle** at the exact price of a tape run, labelled `tape 401`.
 - **Filled "R" triangle**, green (buying resumption) or pink (selling), on the resumption bar, linked by a dotted line to its absorption.
@@ -195,5 +196,6 @@ With neither delta nor imbalances checked, the break alone is enough; with nothi
 - **An iceberg proxy, not an iceberg.** HFQExt gives no book sizes: the study sees a large volume executed at a price that held, not an order refilling beyond what it displayed. The ladder's iceberg dots, which read the book, remain the reference.
 - Imbalances are more frequent on an instrument with thin levels (NQ): an ask of 3 against a bid of 0 counts. No minimum volume per level.
 - "Ticks at the extreme" stays in ticks: on NQ, where a one-minute bar spans about forty ticks, 4 to 8 ticks may suit better.
-- Thresholds start after half of the Memory: the first 50 bars of the chart give nothing.
+- Thresholds start after half of the Memory: the first 50 bars of the chart give nothing. Bars without levels and the blank TT fills a missing day with enter neither the medians nor the detection.
+- **Nothing holds through a gap.** The blank TT fills a missing day with, or a weekday missing between two loaded sessions (tick chart, footprint), ends the zones still open and the resumption windows, and clears the tests of a defended level: what price did meanwhile is unknown. Holidays are not known and count as missing: the day after a full closure (Good Friday, Christmas, New Year's Day), the previous day's zones end at the open.
 - Detection waits for the close: a signal comes at its bar's close, never during it (except the tape, judged as soon as price leaves the run).
