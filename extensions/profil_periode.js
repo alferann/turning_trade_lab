@@ -9,8 +9,10 @@
 // barre et tournees vers le futur, ou a leur cloture et tournees vers le
 // passe. Quatre instances (A a D) pour superposer plusieurs profils.
 //
-// Le volume vient uniquement des niveaux des barres : une barre sans niveaux
-// ne compte pas, et la legende dit quelle part des barres en manque.
+// Le volume vient uniquement des niveaux des barres : une periode qui contient
+// une barre sans niveaux n'est pas dessinee, la legende dit quelle part en manque.
+// Une semaine ou un mois que le graphe ne prend pas a son debut (graphe en
+// ticks) est complete par les barres d'une minute des bougies, sinon masque.
 (function(){
 
 var ET = 'America/New_York';
@@ -36,6 +38,10 @@ var FILET = ' ────────────────────';
 var ETAT = {sig:'', gen:0, n:0, der:'', J:[], prev:null, H:{}, O:{}, cout:3};
 // Seances closes lues pendant l'image en cours.
 var LUES = 0;
+// ponytail: une premiere barre dans l'heure qui suit le debut de la fenetre vaut debut de periode.
+var DEBUT_MAX = 60;
+// ponytail: au-dela de 4 jours entre deux seances (week-end de trois jours compris), une seance manque.
+var TROU_JOURS = 4;
 
 var PERIODES = [['jour','Journalier (séance du graphe)'],['us','Séance US (RTH)'],['asie','Séance Asie'],['eu','Séance Europe'],['sem','Hebdomadaire (semaine ISO)'],['mois','Mensuel']];
 var STYLES = [['plein','Plein'],['tirets','Tirets'],['points','Pointillés'],['fins','Pointillés fins'],['mixte','Tiret-point']];
@@ -56,6 +62,7 @@ var EN = {
   'Depuis la première barre, vers la droite':'From the first bar, facing right', 'Depuis la clôture, vers la gauche':'From the close, facing left',
   'Calcul sur RTH seul (graphe ETH)':'Computed on RTH only (ETH chart)', 'Value Area %':'Value Area %',
   'Largeur au bord droit (% du graphe)':'Width at the right edge (% of chart)', 'Largeur sur la période (% de sa durée)':'Width on the period (% of its span)',
+  'Largeur maximale (% du graphe)':'Maximum width (% of chart)', 'masqué':'hidden',
   'Ticks par rangée (0 = auto)':'Ticks per row (0 = auto)', 'Affichage du volume':'Volume display',
   'Acheteurs et vendeurs empilés':'Buyers and sellers stacked', 'Total, coloré par la Value Area':'Total, colored by the Value Area',
   'Couleur acheteurs':'Buyers color', 'Opacité acheteurs':'Buyers opacity', 'Couleur vendeurs':'Sellers color', 'Opacité vendeurs':'Sellers opacity',
@@ -178,6 +185,12 @@ function fenetre(C, g, r, J, k){
 function dans(f, m){ return !f || (m >= f[0] && m < f[1]) || (m + 1440 >= f[0] && m + 1440 < f[1]); }
 // Vrai si la fenetre croise les minutes de la seance.
 function touche(f, s){ return !f || (s.m0 < f[1] && s.m1 >= f[0]) || (s.m0 < f[1] - 1440 && s.m1 >= f[0] - 1440); }
+// Minute de la premiere des n barres lire(0..n-1) dans la fenetre f, null sans barre.
+function debut(n, lire, f){
+  for(var i = 0; i < n; i++){ var b = lire(i); if(b && !b._trou && dans(f, +b.m)) return +b.m; }
+  return null;
+}
+function jours(a, b){ return (Date.parse(b) - Date.parse(a)) / 864e5; }
 
 // Seances du graphe, barre et minute de debut et de fin. Incremental : si le
 // graphe a seulement grandi, seules les nouvelles barres sont lues ; s'il a
@@ -254,6 +267,72 @@ function histo(g, s, f){
   return H;
 }
 
+// Fichier minute des bougies (payload/_footprint[_eth][_SYM].json, vingt
+// seances glissantes), lu une fois par fetch et partage par les instances ;
+// la page se redessine quand il arrive. Meme lecture que vwap_pro.js.
+var MINUTES = {};
+function minutes(g){
+  var f;
+  try{ f = HFQSymGuard.histFile(g.seance === 'rth' ? '_footprint' : '_footprint_eth', g.sym); }catch(_){ return null; }
+  if(!MINUTES[f]){
+    var M = MINUTES[f] = {pret:false, S:[]}, fini = function(){ M.pret = true; redessiner(); };
+    try{
+      fetch(f, {cache:'no-cache'}).then(function(rep){ return rep.json(); })
+        .then(function(j){ if(j && Array.isArray(j.sessions)) M.S = j.sessions; fini(); }, fini);
+    }catch(_){ M.pret = true; }
+  }
+  return MINUTES[f];
+}
+
+// Semaine ou mois p ouvert par la premiere seance du graphe, que le graphe ne
+// prend pas a son debut : {k, ok, H}, H le volume par tick des barres d'une
+// minute qui precedent la premiere barre du graphe. null si la periode n'est
+// pas concernee. ok faux, et la periode masquee, si ces barres ne remontent
+// pas au premier jour ouvre, ont un trou, ou tant que le fichier n'est pas lu.
+// Un graphe en minutes est tire de ce fichier : rien a y ajouter.
+// ponytail: le fichier se lit en une image, 2 ms par seance environ (25 ms pour douze) ; l'etaler comme histoSeance si l'accroc se voit.
+function amorce(C, g, r, J, p){
+  var T = r.periode, s = J[0];
+  if((T !== 'sem' && T !== 'mois') || p.k0 !== 0 || !s.date) return null;
+  var f = fenetre(C, g, r, J, 0), f0 = f ? f[0] : 0, date0 = s.date, cleDe = T === 'sem' ? semaine : mois;
+  var m0 = debut(s.fin - s.deb + 1, function(i){ return g.barre(s.deb + i); }, f);
+  if(m0 === null || (premierOuvre(T, date0) && m0 < f0 + DEBUT_MAX)) return null;
+  var M = typeof g.tf === 'number' ? null : minutes(g), k = [date0, m0, M ? M.pret : '-'].join('|');
+  if(C.amo && C.amo.k === k) return C.amo.A;
+  var A = {k:k, ok:false, H:vide()}, h = A.H.h, t = g.tick || 0.25, cle = cleDe(date0);
+  var S = M && M.pret ? M.S : [], vu = false, trou = false, prec = null;
+  for(var i = 0; i < S.length; i++){
+    var d = String(S[i].date || '').slice(0, 10), B = S[i].bars || [];
+    if(!B.length || d > date0) continue;
+    // Une seance d'avant la periode : son debut est dans le fichier.
+    if(cleDe(d) !== cle){ A.ok = true; prec = d; continue; }
+    if(prec && jours(prec, d) > TROU_JOURS) trou = true;
+    if(!vu){
+      vu = true;
+      var mf = debut(B.length, function(j){ return B[j]; }, f);
+      A.ok = A.ok || (premierOuvre(T, d) && mf !== null && mf < f0 + DEBUT_MAX);
+    }
+    for(var j = 0; j < B.length; j++){
+      var b = B[j], lv = b.lv || [];
+      if(b._trou || !dans(f, +b.m) || (d === date0 && +b.m + 1 > m0)) continue;
+      A.H.nb++;
+      if(!lv.length){ A.H.sans++; continue; }
+      for(var q = 0; q < lv.length; q++){
+        var bi = lv[q][1] || 0, a = lv[q][2] || 0;
+        if(bi + a > 0){
+          var px = Math.round(lv[q][0] / t), e = h.get(px);
+          if(!e) h.set(px, e = [0, 0]);
+          e[0] += bi; e[1] += a;
+        }
+      }
+    }
+    prec = d;
+  }
+  A.ok = A.ok && !trou && prec !== null && jours(prec, date0) <= TROU_JOURS;
+  C.amo = {k:k, A:A};
+  return A;
+}
+
 function ajoute(A, B){
   B.h.forEach(function(v, p){ var e = A.h.get(p); if(!e) A.h.set(p, e = [0, 0]); e[0] += v[0]; e[1] += v[1]; });
   A.sans += B.sans; A.nb += B.nb;
@@ -293,23 +372,22 @@ function zoneValeur(V, part){
 }
 
 // Profil d'une periode : ticks croissants, bid et ask par tick, POC et aire
-// de valeur en ticks ; null sans volume.
-function profil(S, p, r, J){
+// de valeur en ticks ; null sans volume. `partiel` : date de la premiere
+// seance si la periode n'est pas chargee depuis son debut.
+function profil(S, p, r, J, partiel){
   var T = Array.from(S.h.keys()).sort(function(a, b){ return a - b; }), n = T.length, k;
   if(!n) return null;
   var B = new Float64Array(n), A = new Float64Array(n), V = new Float64Array(n);
   for(k = 0; k < n; k++){ var e = S.h.get(T[k]); B[k] = e[0]; A[k] = e[1]; V[k] = e[0] + e[1]; }
   var Z = zoneValeur(V, r.vaPct / 100), P = r.periode, d = J[p.k0].date;
   return {ticks:T, bid:B, ask:A, total:Z.total, poc:T[Z.poc], vah:T[Z.vah], val:T[Z.val], deb:S.deb, fin:S.fin, sans:S.sans, nb:S.nb,
-          nom:NOM[P], cle:P === 'sem' ? semaine(d).slice(5) : P === 'mois' ? mois(d) : d,
-          // La periode n'est entiere que si le graphe la charge depuis son premier jour ouvre.
-          partiel:(P === 'sem' || P === 'mois') && p.k0 === 0 && !premierOuvre(P, J[0].date) ? J[0].date : null};
+          nom:NOM[P], cle:P === 'sem' ? semaine(d).slice(5) : P === 'mois' ? mois(d) : d, partiel:partiel};
 }
 
 // Profil d'une periode close, calcule une fois ; undefined tant que ses
 // seances ne sont pas toutes lues.
 function fermee(C, g, r, J, p, t0){
-  var id = p.k0 + ':' + p.k1;
+  var A = amorce(C, g, r, J, p), id = p.k0 + ':' + p.k1 + (A ? '|' + A.k : '');
   if(id in C.R) return C.R[id];
   var S = vide();
   for(var k = p.k0; k <= p.k1; k++){
@@ -317,13 +395,15 @@ function fermee(C, g, r, J, p, t0){
     if(!H) return undefined;
     ajoute(S, H);
   }
-  return (C.R[id] = profil(S, p, r, J));
+  if(A && A.ok) ajoute(S, A.H);
+  return (C.R[id] = profil(S, p, r, J, A && !A.ok ? J[0].date : null));
 }
 
 // Profils de la periode en cours (la derniere) et des `hist` precedentes
 // visibles. Les seances closes se calculent une fois, au plus BUDGET_MS par
 // image (rien n'est dessine avant la fin) ; la seance ouverte se relit quand
-// la derniere barre bouge. Une periode precedente partielle est omise.
+// la derniere barre bouge. Une periode precedente partielle ou a barres sans
+// niveaux est omise ; la periode en cours l'est au dessin, legende gardee.
 function calcul(C, g, r){
   var t0 = maintenant(), J = seances(ETAT, g, t0 + BUDGET_MS), n = g.n | 0;
   LUES = 0;
@@ -332,7 +412,7 @@ function calcul(C, g, r){
   var T = r.periode, der = J.length - 1, prec = [], R, p, k;
   if((T === 'sem' || T === 'mois') && !J[der].date) return {cour:null, prec:prec, raison:'Profil de période : barres sans date, profil de séance seulement'};
   var cfg = [ETAT.gen, T, !!r.rth, r.vaPct].join('|');
-  if(C.cfg !== cfg){ C.cfg = cfg; C.fen = {}; C.R = {}; C.cleP = ''; C.somme = {cle:'', S:null}; C.cour = {cle:'', R:null}; }
+  if(C.cfg !== cfg){ C.cfg = cfg; C.fen = {}; C.R = {}; C.cleP = ''; C.somme = {cle:'', S:null}; C.cour = {cle:'', R:null}; C.amo = null; }
   var cleP = J.length + ':' + J[der].m1;
   if(C.cleP !== cleP){ C.cleP = cleP; C.P = periodes(C, g, r, J); }
   var P = C.P;
@@ -343,16 +423,16 @@ function calcul(C, g, r){
     if(J[p.k1].fin < g.premiere || J[p.k0].deb > g.derniere) continue;
     R = fermee(C, g, r, J, p, t0);
     if(R === undefined){ redessiner(); return null; }
-    if(R && !R.partiel) prec.push(R);
+    if(R && !R.partiel && !R.sans) prec.push(R);
   }
 
   p = P[P.length - 1];
   if(p.k1 < der) R = fermee(C, g, r, J, p, t0);
   else {
-    var last = g.barre(n - 1), L = g.niveaux(n - 1);
-    var cleOuv = [n, last && last.c, last && last.h, last && last.l, L.n, L.volume()].join('|'), cle = p.k0 + '|' + cleOuv;
+    var last = g.barre(n - 1), L = g.niveaux(n - 1), A = amorce(C, g, r, J, p), ka = A ? '|' + A.k : '';
+    var cleOuv = [n, last && last.c, last && last.h, last && last.l, L.n, L.volume()].join('|'), cle = p.k0 + '|' + cleOuv + ka;
     if(C.cour.cle !== cle){
-      var cs = p.k0 + '|' + der, S;
+      var cs = p.k0 + '|' + der + ka, S;
       if(C.somme.cle !== cs){
         S = vide();
         for(k = p.k0; k < der; k++){
@@ -360,11 +440,12 @@ function calcul(C, g, r){
           if(!H){ redessiner(); return null; }
           ajoute(S, H);
         }
+        if(A && A.ok) ajoute(S, A.H);
         C.somme = {cle:cs, S:S};
       }
       var O = histoSeance(C, g, r, J, der, t0, cleOuv);
       if(!O){ redessiner(); return null; }
-      C.cour = {cle:cle, R:profil(ajoute(ajoute(vide(), C.somme.S), O), p, r, J)};
+      C.cour = {cle:cle, R:profil(ajoute(ajoute(vide(), C.somme.S), O), p, r, J, A && !A.ok ? J[0].date : null)};
     }
     R = C.cour.R;
   }
@@ -428,7 +509,10 @@ function dessine(C, rang, g, r){
   // Une ligne de texte par instance en haut du graphe, pour ne pas se chevaucher.
   var yTxt = F.haut + (12 + 13 * rang) * e;
   if(X.raison) g.texte(F.gauche + 8 * e, yTxt, tr(X.raison), {couleur:'#8a929c', taille:10});
-  var tous = X.cour ? X.prec.concat([X.cour]) : X.prec;
+  // Rien de dessine sur une periode en cours incomplete : seule la legende dit pourquoi.
+  var masque = X.cour && (X.cour.partiel || X.cour.sans);
+  var tous = X.cour && !masque ? X.prec.concat([X.cour]) : X.prec;
+  if(masque) legende(g, r, X.cour, yTxt);
   if(!tous.length) return;
 
   // Rangees d'au moins RANGEE_PX en auto ; colonne lue sur la projection.
@@ -437,13 +521,14 @@ function dessine(C, rang, g, r){
   var pas = r.rangee >= 1 ? r.rangee | 0 : Math.max(1, Math.ceil(RANGEE_PX * e / Math.max(hTick, 1e-9)));
   var col = Math.abs(g.x(g.premiere + 1) - g.x(g.premiere));
   var Q = {hors:[], va:[], poc:[], achat:[], vente:[], achatH:[], venteH:[], cadre:[]}, LP = [], LV = [], x0, x1;
+  var wMax = F.largeur * (+r.largeurMax || 100) / 100;
   for(k = 0; k < tous.length; k++){
     R = tous[k];
     var xa = g.x(R.deb) - col / 2, xb = g.x(R.fin) + col / 2, cour = R === X.cour;
     if(r.profil){
-      if(cour && r.place === 'droite') histogramme(Q, g, r, R, pas, F.droite, -1, F.largeur * r.largeur / 100);
-      else if(r.sens === 'passe') histogramme(Q, g, r, R, pas, xb, -1, (xb - xa) * r.largeurP / 100);
-      else histogramme(Q, g, r, R, pas, xa, 1, (xb - xa) * r.largeurP / 100);
+      if(cour && r.place === 'droite') histogramme(Q, g, r, R, pas, F.droite, -1, Math.min(wMax, F.largeur * r.largeur / 100));
+      else if(r.sens === 'passe') histogramme(Q, g, r, R, pas, xb, -1, Math.min(wMax, (xb - xa) * r.largeurP / 100));
+      else histogramme(Q, g, r, R, pas, xa, 1, Math.min(wMax, (xb - xa) * r.largeurP / 100));
     }
     // La periode en cours prolonge ses niveaux jusqu'au bord droit, les precedentes s'arretent a leur cloture.
     x0 = cour ? Math.max(F.gauche, xa) : xa; x1 = cour ? F.droite : xb;
@@ -463,7 +548,7 @@ function dessine(C, rang, g, r){
   if(r.vaL) g.trait(LV, {couleur:r.vaLC, epaisseur:+r.vaLE || 1, pointille:POINTILLE[r.vaLT] || null, opacite:+r.vaLO});
 
   R = X.cour;
-  if(!R) return;
+  if(!R || masque) return;
   // Prix des niveaux au-dessus de leur ligne, au bord gauche ou au debut de la periode.
   if(r.etiq){
     var nom = function(niv){ return (PREFIXE[T] || '') + niv + (SUFFIXE[T] ? ' ' + tr(SUFFIXE[T]) : ''); };
@@ -471,12 +556,16 @@ function dessine(C, rang, g, r){
     for(k = 0; k < niv.length; k++) if(niv[k][2])
       g.texte(xl, g.y(niv[k][1] * t) - 2 * e, nom(niv[k][0]) + ' ' + prix(niv[k][1], t), {couleur:niv[k][3], taille:10, base:'bottom'});
   }
-  // Les mises en garde s'affichent meme sans etiquettes.
-  if(!r.etiq && !R.partiel && !R.sans) return;
-  var titre = tr(R.nom) + (R.cle ? ' ' + R.cle : '');
-  if(R.partiel) titre += ' · ' + tr('partiel, depuis le') + ' ' + R.partiel;
-  if(R.sans) titre += ' · ' + Math.round(100 * R.sans / R.nb) + ' % ' + tr('des barres sans niveaux');
-  g.texte(F.droite - 4 * e, yTxt, titre, {couleur:'#8a929c', taille:10, align:'right'});
+  if(r.etiq) legende(g, r, R, yTxt);
+}
+
+// Legende de la periode en cours, et pourquoi elle est masquee.
+function legende(g, r, R, y){
+  var e = g.echelle || 1, titre = tr(R.nom) + (R.cle ? ' ' + R.cle : ''), pq = [];
+  if(R.partiel) pq.push(tr('partiel, depuis le') + ' ' + R.partiel);
+  if(R.sans) pq.push(Math.round(100 * R.sans / R.nb) + ' % ' + tr('des barres sans niveaux'));
+  if(pq.length) titre += ' · ' + tr('masqué') + ' : ' + pq.join(', ');
+  g.texte(g.cadre.droite - 4 * e, y, titre, {couleur:'#8a929c', taille:10, align:'right'});
 }
 
 function reglages(periode){
@@ -487,8 +576,9 @@ function reglages(periode){
     {k:'sens',     label:'Profils posés sur leur période', type:'select', defaut:'futur', options:[['futur','Depuis la première barre, vers la droite'],['passe','Depuis la clôture, vers la gauche']]},
     {k:'rth',      label:'Calcul sur RTH seul (graphe ETH)', type:'check', defaut:false},
     {k:'vaPct',    label:'Value Area %', type:'number', defaut:70, min:50, max:95, pas:1},
-    {k:'largeur',  label:'Largeur au bord droit (% du graphe)', type:'number', defaut:25, min:5, max:60, pas:1},
+    {k:'largeur',  label:'Largeur au bord droit (% du graphe)', type:'number', defaut:25, min:5, max:100, pas:1},
     {k:'largeurP', label:'Largeur sur la période (% de sa durée)', type:'number', defaut:60, min:5, max:100, pas:5},
+    {k:'largeurMax', label:'Largeur maximale (% du graphe)', type:'number', defaut:100, min:5, max:100, pas:1},
     {k:'rangee',   label:'Ticks par rangée (0 = auto)', type:'number', defaut:0, min:0, max:100, pas:1},
     {k:'profil',   label:'Histogramme' + FILET, type:'check', defaut:true},
     {k:'mode',     label:'Affichage du volume', type:'select', defaut:'empile', options:[['empile','Acheteurs et vendeurs empilés'],['total','Total, coloré par la Value Area']]},

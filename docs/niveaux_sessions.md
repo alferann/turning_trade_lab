@@ -28,7 +28,7 @@ Ce que ça change pour la décision : des cibles et des zones de réaction connu
 ## Lire le graphe
 
 - **Un trait par niveau**, dans la couleur de sa session dans Turning Trade, depuis la barre de l'extrême jusqu'à la barre qui l'a pris, ou jusqu'au bord droit s'il est encore vierge (ou avec le réglage « Bord droit »).
-- **Étiquettes** au bout du trait : `Tokyo H`, `Londres L`… (`H` pour le haut au-dessus du trait, `L` pour le bas au-dessous).
+- **Étiquettes** au début du trait, collées au bord gauche quand le trait commence hors écran, ou au bout du trait selon le réglage : `Tokyo H`, `Londres L`… (`H` pour le haut au-dessus du trait, `L` pour le bas au-dessous).
 - Seule la dernière occurrence close de chaque session est tracée : pendant la séance de New York, le New York tracé est celui de la veille. La session en cours ne compte qu'une fois close, à l'arrivée de la première barre de la suivante.
 
 ## Configurer
@@ -41,7 +41,8 @@ Ce que ça change pour la décision : des cibles et des zones de réaction connu
 | Style | Plein, tirets ou pointillés | tirets |
 | Épaisseur | Épaisseur des traits, de 0,5 à 4 | 1 |
 | Opacité | Opacité des traits et des étiquettes, de 0,05 à 1 | 0,85 |
-| Étiquettes | Nom de la session et H ou L au bout des traits | cochée |
+| Étiquettes | Nom de la session et H ou L sur les traits | cochée |
+| Position des étiquettes | À gauche, au début du trait (ou au bord gauche), ou à droite, au bout du trait | à gauche |
 
 Les bornes, les noms et les couleurs se changent dans Turning Trade : menu du graphe, Sessions du monde. Les cases « Compter cette session » de ce panneau n'y changent rien : l'étude prend toujours les quatre sessions, et seules ses propres cases choisissent celles qu'elle affiche. Pas besoin non plus d'afficher les bandes de session sur le graphe.
 
@@ -84,7 +85,7 @@ What it changes for the decision: targets and reaction zones known in advance, a
 ## Reading the chart
 
 - **One line per level**, in its session's colour in Turning Trade, from the bar of the extreme to the bar that took it, or to the right edge if it is still untouched (or with the "Right edge" setting).
-- **Labels** at the end of the line: `Tokyo H`, `London L`… (`H` for the high, above the line, `L` for the low, below it).
+- **Labels** at the start of the line, stuck to the left edge when the line starts off screen, or at its end per the setting: `Tokyo H`, `London L`… (`H` for the high, above the line, `L` for the low, below it).
 - Only the last closed occurrence of each session is drawn: during the New York session, the New York shown is the previous day's. The current session only counts once closed, when the first bar of the next one arrives.
 
 ## Settings
@@ -99,7 +100,8 @@ Labels below are those shown when Turning Trade is set to English.
 | Style | Solid, dashed or dotted | dashed |
 | Thickness | Line thickness, from 0.5 to 4 | 1 |
 | Opacity | Opacity of lines and labels, from 0.05 to 1 | 0.85 |
-| Labels | Session name and H or L at the end of the lines | checked |
+| Labels | Session name and H or L on the lines | checked |
+| Label position | Left, at the start of the line (or the left edge), or right, at its end | left |
 
 Bounds, names and colours are changed in Turning Trade: chart menu, World sessions. The panel's "Count this session" boxes make no difference: the study always takes all four sessions, and only its own boxes choose which ones it shows. Session bands do not need to be shown on the chart either.
 

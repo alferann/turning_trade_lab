@@ -39,7 +39,8 @@ var EN = {
   'Bord droit':'Right edge', 'Notification':'Notification', 'Au premier toucher':'On the first touch',
   'À la première clôture au-delà':'On the first close beyond', 'Session de Tokyo':'Tokyo session', 'Session de Londres':'London session',
   'Session de New York':'New York session', 'Session de clôture':'Close session', 'Style':'Style',
-  'Niveau touché':'Level touched', 'Clôture au-delà du niveau':'Close beyond the level'
+  'Niveau touché':'Level touched', 'Clôture au-delà du niveau':'Close beyond the level',
+  'Position des étiquettes':'Label position', 'À gauche (début du trait)':'Left (start of the line)', 'À droite (fin du trait)':'Right (end of the line)'
 };
 EN[DESC] = DESC_EN;
 EN[DESC + ' (extensions/niveaux_sessions.js)'] = DESC_EN + ' (extensions/niveaux_sessions.js)';
@@ -209,7 +210,8 @@ HFQExt.etude({
     {k:'style', label:'Style', type:'select', defaut:'tirets', options:[['plein','Plein'],['tirets','Tirets'],['points','Pointillés']]},
     {k:'ep', label:'Épaisseur', type:'number', defaut:1, min:0.5, max:4, pas:0.5},
     {k:'op', label:'Opacité', type:'number', defaut:0.85, min:0.05, max:1, pas:0.05},
-    {k:'etiq', label:'Étiquettes', type:'check', defaut:true}
+    {k:'etiq', label:'Étiquettes', type:'check', defaut:true},
+    {k:'etiqPos', label:'Position des étiquettes', type:'select', defaut:'gauche', options:[['gauche','À gauche (début du trait)'],['droite','À droite (fin du trait)']]}
   ],
   calcul:calcul,
   outils:{fenetres:fenetres},
@@ -225,10 +227,12 @@ HFQExt.etude({
       [o.H, o.L].forEach(function(v){
         var t = r.jusqua === 'bord' ? -1 : r.jusqua === 'cloture' ? v.c : v.m;
         if(v.i > fin || (t >= 0 && t < deb)) return;
-        var x1 = t >= 0 ? g.x(t) : F.droite, y = g.y(v.p);
-        g.trait([[g.x(Math.max(v.i, deb)), y], [x1, y]], {couleur:o.col, opacite:+r.op, epaisseur:+r.ep || 1, pointille:POINTILLE[r.style] || null});
-        if(r.etiq) g.texte(Math.min(x1, F.droite) - 3 * e, y + v.s * -2 * e, tr(o.nom) + (v.s > 0 ? ' H' : ' L'),
-          {couleur:o.col, opacite:+r.op, taille:10, align:'right', base:v.s > 0 ? 'bottom' : 'top'});
+        var x0 = g.x(Math.max(v.i, deb)), x1 = t >= 0 ? g.x(t) : F.droite, y = g.y(v.p);
+        g.trait([[x0, y], [x1, y]], {couleur:o.col, opacite:+r.op, epaisseur:+r.ep || 1, pointille:POINTILLE[r.style] || null});
+        // A gauche, l'etiquette suit le debut du trait, ou le bord gauche quand il commence hors du cadre.
+        var gauche = r.etiqPos !== 'droite';
+        if(r.etiq) g.texte(gauche ? Math.max(x0, F.gauche) + 3 * e : Math.min(x1, F.droite) - 3 * e, y + v.s * -2 * e, tr(o.nom) + (v.s > 0 ? ' H' : ' L'),
+          {couleur:o.col, opacite:+r.op, taille:10, align:gauche ? 'left' : 'right', base:v.s > 0 ? 'bottom' : 'top'});
       });
     }
   }
