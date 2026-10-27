@@ -16,9 +16,13 @@ const N = bars.length, tick = db.tick;
 const J = e => !e || !e.length ? { n: 0, prix: () => 0, bid: () => 0, ask: () => 0 }
   : { n: e.length, prix: k => e[k][0], bid: k => e[k][1] || 0, ask: k => e[k][2] || 0 };
 
-// No HFQSessionsMonde in the context: the study falls back to its built-in session defaults.
-const defs = [];
-vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console }));
+// No HFQSessionsMonde in the context: the study falls back to its built-in session defaults. fetch serves the
+// one-minute files of FICHIERS only when servir() is awaited, like a request in flight.
+const defs = [], FICHIERS = {}, appels = [], attente = [];
+vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console,
+  HFQSymGuard: { histFile: (t, s) => t + '_' + s + '.json' },
+  fetch(f) { appels.push(f); return new Promise(ok => attente.push(() => ok({ json: () => FICHIERS[f] }))); } }));
+const servir = async () => { while (attente.length) attente.shift()(); await new Promise(r => setImmediate(r)); };
 assert.equal(defs.length, 6, 'six instances');
 assert.deepEqual(defs.map(d => d.id), ['vwap-pro-a', 'vwap-pro-b', 'vwap-pro-c', 'vwap-pro-d', 'vwap-pro-e', 'vwap-pro-f'], 'ids stables');
 const A = defs[0];
@@ -88,13 +92,73 @@ const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a 
   assert.ok(Number.isNaN(C.vwap[BP.findIndex((b, i) => i >= iPlein && b.m === 1320)]), 'fin auto à 16:00 ET');
 }
 
-// 5. Weekly and monthly: the loaded sessions of the last one's ISO week and month, carried over each session open.
+// 5. Weekly and monthly. Up to eight sessions that start within their first hour are relabelled on the business days
+// from Monday 2 November 2026, the first business day of its month, so the bench does not depend on the days the
+// archive holds: week 45 (2 to 6 November), then week 46.
+const ouvres = [];
+for (const d = new Date(Date.UTC(2026, 10, 2)); ouvres.length < 8; d.setUTCDate(d.getUTCDate() + 1)) if (d.getUTCDay() % 6) ouvres.push(d.toISOString().slice(0, 10));
+const R = db.sessions.filter(s => s.bars.length && s.bars[0].m < 60).slice(0, 8).map((s, k) => ({ date: ouvres[k], bars: s.bars }));
+assert.ok(R.length >= 4, 'au moins quatre séances complètes dans l\'archive');
+const aplat = S => S.flatMap(s => s.bars.map(b => Object.assign({ _date: s.date, v: b.lv.reduce((a, l) => a + l[1] + l[2], 0) }, b)));
+const cleP = { sem: d => A.outils.semaine(d), mois: d => d.slice(0, 7) };
+const BR = aplat(R), BT = aplat(R.slice(2)), d0 = BR.length - BT.length;
+const ticks = (B, sym) => Object.assign(g(B), { tf: '1000t', sym });
+const sem45 = b => A.outils.semaine(b._date) === A.outils.semaine(R[2].date);
 {
-  for (const [anc, cle] of [['sem', d => A.outils.semaine(d.slice(0, 10))], ['mois', d => d.slice(0, 7)]]) {
-    const S = db.sessions.filter(s => cle(s.date) === cle(cur.date)), C = A.calcul(g(), avec({ anc }));
-    proche(C.vwap[N - 1], brute(S.flatMap(s => s.bars)).vwap, anc + ' sur ' + S.length + ' séances');
-    proche(C.vwap[iCur], brute(S.slice(0, -1).flatMap(s => s.bars).concat([cur.bars[0]])).vwap, anc + ' : ouverture de la dernière séance');
+  const last = R.at(-1), iLast = BR.length - last.bars.length;
+  for (const anc of ['sem', 'mois']) {
+    const S = R.filter(s => cleP[anc](s.date) === cleP[anc](last.date)), C = A.calcul(g(BR), avec({ anc }));
+    proche(C.vwap[BR.length - 1], brute(S.flatMap(s => s.bars)).vwap, anc + ' sur ' + S.length + ' séances');
+    proche(C.vwap[iLast], brute(S.slice(0, -1).flatMap(s => s.bars).concat([last.bars[0]])).vwap, anc + ' : ouverture de la dernière séance');
   }
+}
+
+// 5b. A minute chart is cut from the very file that would complete it: taken from Wednesday 4 November, its month and
+// first week are masked, the next week is drawn, and no file is read.
+{
+  const n0 = appels.length;
+  assert.ok(Array.from(A.calcul(g(BT), avec({ anc: 'mois' })).vwap.subarray(0, BT.length)).every(Number.isNaN), 'minutes depuis le 4 : mois masqué');
+  const W = A.calcul(g(BT), avec({ anc: 'sem' }));
+  assert.ok(BT.every((b, i) => !sem45(b) || Number.isNaN(W.vwap[i])), 'minutes depuis le 4 : semaine 45 masquée');
+  if (!sem45(BT.at(-1))) assert.ok(Number.isFinite(W.vwap[BT.length - 1]), 'semaine 46 tracée');
+  assert.equal(appels.length, n0, 'graphe en minutes : aucun fichier lu');
+}
+
+// 5c. Tick chart from Wednesday 4 November: masked until the one-minute file is read, then completed by it, equal to
+// the minute chart that holds the whole period; the file is read once for every anchor.
+{
+  FICHIERS['_footprint_eth_T1.json'] = { sessions: R };
+  const T = ticks(BT, 'T1'), n0 = appels.length;
+  assert.ok(Number.isNaN(A.calcul(T, avec({ anc: 'mois' })).vwap[0]), 'masqué tant que le fichier n\'est pas lu');
+  await servir();
+  for (const anc of ['mois', 'sem']) {
+    const r = avec({ anc }), ref = Array.from(defs[1].calcul(g(BR), r).vwap.subarray(d0, BR.length));
+    const tk = Array.from(A.calcul(T, r).vwap.subarray(0, BT.length));
+    assert.ok(tk.every((v, i) => Number.isNaN(v) ? Number.isNaN(ref[i]) : Math.abs(v - ref[i]) < 1e-6), anc + ' : ticks complétés = minutes entières');
+  }
+  assert.deepEqual(appels.slice(n0), ['_footprint_eth_T1.json'], 'fichier minute lu une fois');
+}
+
+// 5d. Tick chart starting mid-session: the minutes of that session before its first bar are added too.
+{
+  FICHIERS['_footprint_eth_T2.json'] = { sessions: R };
+  const k = BR.findIndex(b => b._date === R[2].date && b.m >= 600), T = ticks(BR.slice(k), 'T2');
+  assert.ok(k > 0, 'séance du 4 jusqu\'à 04:00 ET');
+  A.calcul(T, avec({ anc: 'mois' })); await servir();
+  proche(A.calcul(T, avec({ anc: 'mois' })).vwap[BR.length - k - 1], brute(R.flatMap(s => s.bars)).vwap, 'ticks pris en cours de séance');
+}
+
+// 5e. Nothing displayed on missing data: a file that does not reach the first business day, or that has a hole of
+// more than four days, masks the period instead of drawing it from the first loaded bar.
+{
+  FICHIERS['_footprint_eth_T3.json'] = { sessions: R.slice(1) };
+  FICHIERS['_footprint_eth_T4.json'] = { sessions: [{ date: '2026-11-02', bars: R[0].bars }, { date: '2026-11-10', bars: R[1].bars }] };
+  const T3 = ticks(BT, 'T3'), T4 = ticks(aplat([{ date: '2026-11-11', bars: R[2].bars }]), 'T4');
+  A.calcul(T3, avec({ anc: 'mois' })); A.calcul(T4, avec({ anc: 'mois' })); await servir();
+  assert.ok(Array.from(A.calcul(T3, avec({ anc: 'mois' })).vwap.subarray(0, BT.length)).every(Number.isNaN), 'fichier sans le 2 : mois masqué');
+  const W = A.calcul(T3, avec({ anc: 'sem' }));
+  assert.ok(BT.every((b, i) => !sem45(b) || Number.isNaN(W.vwap[i])), 'fichier sans le 2 : semaine 45 masquée');
+  assert.ok(Array.from(A.calcul(T4, avec({ anc: 'mois' })).vwap.subarray(0, R[2].bars.length)).every(Number.isNaN), 'trou du 2 au 10 : mois masqué');
 }
 
 // 6. Incremental cache: one more bar extends the sums instead of recomputing, same result as from scratch.
