@@ -12,15 +12,23 @@
 // sur le volume par prix du footprint quand la barre en a, sinon sur le
 // volume de la barre a son prix typique.
 //
-// Une semaine ou un mois que le graphe ne prend pas a son debut (un graphe en
-// ticks remonte a deux semaines environ) est complete par les barres d'une
-// minute que TT sert aux bougies ; si elles n'y remontent pas non plus, la
-// periode est masquee plutot que tracee depuis la premiere barre chargee.
+// Rien n'est trace sur des donnees manquantes. La premiere periode du graphe,
+// quand il ne la prend pas a son debut (un graphe en ticks remonte a deux
+// semaines environ et commence ou il veut dans la seance), est completee par
+// les barres d'une minute que TT sert aux bougies ; si elles n'y remontent pas
+// non plus, la periode est masquee plutot que tracee depuis la premiere barre
+// chargee. Plus loin, une periode entamee en retard est masquee, et une periode
+// qui perd des donnees (barres de comblement d'un jour manquant, seance
+// tronquee ou absente dans une semaine ou un mois) est masquee a partir de la.
 (function(){
 
 var ET = 'America/New_York', NSD = 6;
 // ponytail: minute ET de l'ouverture du graphe, 18:00 en ETH et 09:30 en RTH (ES, NQ).
 var OUVERTURE = {eth:1080, rth:570};
+// ponytail: duree de la seance du graphe en minutes, 23 h en ETH et 6 h 30 en RTH (ES, NQ).
+var DUREE = {eth:1380, rth:390};
+// Ancrages sur une fenetre de seance du monde.
+var SEANCES = {us:1, asie:1, eu:1};
 
 // Memes defauts que hfq-sessions-monde.js : une seance court jusqu'a la suivante.
 var DEFAUTS = [
@@ -43,10 +51,10 @@ var POINTILLE = {plein:null, tirets:[6,4], points:[2,3], fins:[1,3], mixte:[8,3,
 var BUDGET_MS = 4;
 // ponytail: au zoom arriere, un point tous les PX_POINT pixels ; VWAP et bandes sont assez lisses pour que l'oeil n'y voie rien.
 var PX_POINT = 2;
-// ponytail: une semaine ou un mois commence dans les donnees si sa premiere barre tombe dans la premiere heure de son premier jour ouvre.
+// ponytail: une periode commence dans les donnees si sa premiere barre tombe dans l'heure qui suit son debut (ouverture de la seance, de la fenetre, ou du premier jour ouvre de la semaine ou du mois).
 var DEBUT_MAX = 60;
-// ponytail: plus de quatre jours entre deux seances (un week-end et un ferie), c'est un trou ; un seul jour manquant passe pour un ferie.
-var TROU_JOURS = 4;
+// ponytail: une seance close va jusqu'a sa fin si sa derniere barre tombe a moins de 4 h de la fin de la seance du graphe, cloture anticipee d'un jour ferie comprise (regle de pivots.js et confluence.js).
+var FIN_MAX = 240;
 var ZERO = {V:0, PV:0, PV2:0};
 var NOMS ={jour:'DVWAP', sem:'wVWAP', mois:'mVWAP', us:'VWAP RTH', asie:'VWAP Asie', eu:'VWAP EU'};
 
@@ -150,6 +158,17 @@ function fenetreM(bornes, ouv){
   if(b <= a) b += 1440;
   return [a, b];
 }
+function dansF(F, m){ return (m >= F[0] && m < F[1]) || (m + 1440 >= F[0] && m + 1440 < F[1]); }
+
+// Minutes entre le debut de l'ancrage et la minute m d'une seance du graphe
+// datee `date` : depuis l'ouverture (jour, et semaine ou mois a son premier
+// jour ouvre, Infinity un autre jour), depuis le debut de la fenetre F (us,
+// asie, eu). Une fenetre qui enjambe l'ouverture du graphe a commence dans la
+// seance precedente : Infinity si le marche y traitait, sinon depuis l'ouverture.
+function ecart(anc, F, date, m, dur){
+  if(F) return m >= F[0] ? m - F[0] : F[0] >= dur ? m : Infinity;
+  return (anc === 'sem' || anc === 'mois') && date && !premierOuvre(anc, date) ? Infinity : m;
+}
 
 // Semaine ISO d'une date AAAA-MM-JJ, en cle triable.
 function semaine(cle){
@@ -177,12 +196,18 @@ function premierOuvre(anc, date){
   return true;
 }
 
-function jours(a, b){ return (Date.parse(b) - Date.parse(a)) / 864e5; }
+// Jours ouvres strictement entre deux dates AAAA-MM-JJ.
+// ponytail: les feries sont ignores ; un seul jour ouvre sans seance passe pour un ferie, deux font un trou.
+function manquent(a, b){
+  var n = 0;
+  for(var d = Date.parse(a) + 864e5, f = Date.parse(b); d < f; d += 864e5) if(new Date(d).getUTCDay() % 6) n++;
+  return n;
+}
 
 // Barres d'une minute que TT sert aux bougies (vingt seances glissantes), lues
 // une fois par fichier et partagees par les six instances. Un graphe en ticks
-// ne remonte qu'a deux semaines environ : elles completent la semaine ou le
-// mois de sa premiere barre.
+// ne remonte qu'a deux semaines environ : elles completent la seance, la
+// fenetre, la semaine ou le mois de sa premiere barre.
 var MINUTES = {};
 function minutes(g){
   var f;
@@ -209,30 +234,46 @@ function sommes(A, b, src){
   A.V += w; A.PV += p * w; A.PV2 += p * p * w;
 }
 
-// Semaine ou mois de la premiere barre quand le graphe ne le prend pas a son
-// debut : {cle, ok, V, PV, PV2}, les sommes des barres d'une minute qui la
-// precedent. ok faux, et la periode masquee, si les donnees ne remontent pas a
-// son debut ou ont un trou, et tant que le fichier n'est pas lu. Un graphe en
-// minutes est tire de ce fichier : rien a y ajouter, la periode est masquee.
+// Premiere periode du graphe quand il ne la prend pas a son debut (graphe en
+// ticks) : {cle, ok, V, PV, PV2}, les sommes des barres d'une minute du fichier
+// qui precedent sa premiere barre, dans la fenetre de l'ancrage. ok faux, et la
+// periode masquee, tant que le fichier n'est pas lu ou si ces barres ne la
+// couvrent pas : debut de la periode absent, seance entamee en retard ou
+// tronquee, plus d'un jour ouvre sans seance (le fichier n'a pas de barres de
+// comblement), derniere barre plus d'une heure avant la premiere du graphe.
+// null s'il n'y a rien a completer, ou rien pour le faire : un graphe en
+// minutes est tire de ce fichier, le footprint n'a pas de date ; calcul y
+// masque la periode.
 function amorce(C, g, r, b0, sig){
-  if((r.anc !== 'sem' && r.anc !== 'mois') || !b0 || !b0._date) return null;
-  var date0 = String(b0._date).slice(0, 10);
-  if(premierOuvre(r.anc, date0) && +b0.m < DEBUT_MAX) return null;
-  var M = typeof g.tf === 'number' ? null : minutes(g), k = sig + '|' + (M ? M.pret : '-');
+  if(!b0 || !b0._date || typeof g.tf === 'number') return null;
+  var anc = r.anc, date0 = String(b0._date).slice(0, 10), m0 = +b0.m, dur = DUREE[g.seance] || DUREE.eth, cal = anc === 'sem' || anc === 'mois';
+  var F = SEANCES[anc] ? fenetreM(bornesET(anc, date0, r), OUVERTURE[g.seance] != null ? OUVERTURE[g.seance] : 1080) : null;
+  if((F && !dansF(F, m0)) || ecart(anc, F, date0, m0, dur) < DEBUT_MAX) return null;
+  var M = minutes(g), k = sig + '|' + (M ? M.pret : '-');
   if(C.amo && C.amo.k === k) return C.amo.A;
-  var A = {cle:periode(r.anc, date0), ok:false, V:0, PV:0, PV2:0};
-  var S = M && M.pret ? M.S : [], vu = false, trou = false, prec = null;
+  // La seance de la premiere barre ne vient du fichier que si le graphe ne la prend pas dans l'heure.
+  var A = {cle:cal ? periode(anc, date0) : 'j0', ok:false, V:0, PV:0, PV2:0}, besoin = ecart(anc, F, '', m0, dur) >= DEBUT_MAX;
+  var S = M && M.pret ? M.S : [], debut = !cal, ok = true, vu = false, prec = null;
   for(var i = 0; i < S.length; i++){
     var d = String(S[i].date || '').slice(0, 10), B = S[i].bars || [];
-    if(!B.length || d > date0) continue;
+    if(!B.length || d > date0 || (!cal && d !== date0)) continue;
     // Une seance d'avant la periode : son debut est dans le fichier.
-    if(periode(r.anc, d) !== A.cle){ A.ok = true; prec = d; continue; }
-    if(prec && jours(prec, d) > TROU_JOURS) trou = true;
-    if(!vu){ vu = true; A.ok = A.ok || (premierOuvre(r.anc, d) && +B[0].m < DEBUT_MAX); }
-    for(var j = 0; j < B.length; j++) if(d < date0 || +B[j].m + 1 <= +b0.m) sommes(A, B[j], r.src);
+    if(cal && periode(anc, d) !== A.cle){ debut = true; prec = d; continue; }
+    if(prec && manquent(prec, d) > 1) ok = false;
+    if(!vu){ vu = true; debut = debut || premierOuvre(anc, d); }
+    var fin = d < date0 ? Infinity : m0, e0 = null, e1 = null;
+    for(var j = 0; j < B.length; j++){
+      var m = +B[j].m;
+      if(m + 1 > fin || (F && !dansF(F, m))) continue;
+      if(e0 === null) e0 = m;
+      e1 = m;
+      sommes(A, B[j], r.src);
+    }
+    // Chaque seance entamee dans l'heure ; une veille jusqu'a sa fin, le jour meme jusqu'a l'heure qui precede la premiere barre du graphe.
+    if(d < date0 || besoin) ok = ok && e0 !== null && ecart(anc, F, '', e0, dur) < DEBUT_MAX && (d < date0 ? e1 >= dur - FIN_MAX : e1 + 1 >= m0 - DEBUT_MAX);
     prec = d;
   }
-  A.ok = A.ok && !trou && prec !== null && jours(prec, date0) <= TROU_JOURS;
+  A.ok = debut && ok && prec !== null && (prec === date0 || (!besoin && manquent(prec, date0) <= 1));
   C.amo = {k:k, A:A};
   return A;
 }
@@ -245,12 +286,13 @@ function redessiner(){
   try{ if(typeof setTimeout !== 'undefined' && HFQExt.redessiner) setTimeout(function(){ HFQExt.redessiner(); }, 0); }catch(_){}
 }
 
-function cache(){ return {sig:'', id0:'', der:'', n:0, fen:{}, cle:[], sessAt:new Int32Array(0), V:new Float64Array(0), PV:new Float64Array(0), PV2:new Float64Array(0), vwap:new Float64Array(0), sd:new Float64Array(0)}; }
+function cache(){ return {sig:'', id0:'', der:'', n:0, fen:{}, cle:[], sessAt:new Int32Array(0), ok:new Uint8Array(0), V:new Float64Array(0), PV:new Float64Array(0), PV2:new Float64Array(0), vwap:new Float64Array(0), sd:new Float64Array(0)}; }
 
 function agrandir(C, n){
   if(C.V.length >= n) return;
-  var t = Math.max(n, C.V.length * 2), s = new Int32Array(t);
+  var t = Math.max(n, C.V.length * 2), s = new Int32Array(t), o = new Uint8Array(t);
   s.set(C.sessAt); C.sessAt = s;
+  o.set(C.ok); C.ok = o;
   ['V','PV','PV2','vwap','sd'].forEach(function(k){ var a = new Float64Array(t); a.set(C[k]); C[k] = a; });
 }
 
@@ -268,22 +310,21 @@ function calcul(C, g, r, fin){
   var depuis = (C.sig === sig && C.id0 === id0 && C.A === A && n >= C.n && C.n > 0 && cleBarre(g.barre(C.n - 1)) === C.der) ? C.n - 1 : 0;
   if(!depuis) C.fen = {};
   agrandir(C, n);
-  var ouv = OUVERTURE[g.seance] != null ? OUVERTURE[g.seance] : 1080;
+  var ouv = OUVERTURE[g.seance] != null ? OUVERTURE[g.seance] : 1080, dur = DUREE[g.seance] || DUREE.eth;
   var prev = depuis > 0 ? g.barre(depuis - 1) : null;
   var sess = depuis > 0 ? C.sessAt[depuis - 1] : 0;
   for(var i = depuis; i < n; i++){
     if(fin && !(i & 255) && i > depuis && maintenant() > fin) break;
     var b = g.barre(i);
-    if(!b){ C.cle[i] = null; C.vwap[i] = NaN; C.sd[i] = NaN; C.sessAt[i] = sess; C.V[i] = 0; continue; }
+    if(!b){ C.cle[i] = null; C.vwap[i] = NaN; C.sd[i] = NaN; C.sessAt[i] = sess; C.V[i] = 0; C.ok[i] = 0; continue; }
     if(prev && (b._date != null ? String(b._date) !== String(prev._date) : +b.m < +prev.m)) sess++;
     C.sessAt[i] = sess;
-    var date = b._date ? String(b._date).slice(0, 10) : '', cle;
+    var date = b._date ? String(b._date).slice(0, 10) : '', cle, F = null;
     if(r.anc === 'jour') cle = 'j' + sess;
     else if(r.anc === 'sem' || r.anc === 'mois') cle = date ? periode(r.anc, date) : 'j' + sess;
     else {
-      var F = C.fen[date] || (C.fen[date] = fenetreM(bornesET(r.anc, date || aujourdhui(), r), ouv));
-      var m = +b.m, dans = (m >= F[0] && m < F[1]) || (m + 1440 >= F[0] && m + 1440 < F[1]);
-      cle = dans ? 'j' + sess : null;
+      F = C.fen[date] || (C.fen[date] = fenetreM(bornesET(r.anc, date || aujourdhui(), r), ouv));
+      cle = dansF(F, +b.m) ? 'j' + sess : null;
     }
     var v = 0, pv = 0, pv2 = 0, p, w;
     if(cle && !b._trou){
@@ -300,7 +341,16 @@ function calcul(C, g, r, fin){
     C.PV[i] = (suite ? C.PV[i - 1] : A0.PV) + pv;
     C.PV2[i] = (suite ? C.PV2[i - 1] : A0.PV2) + pv2;
     C.cle[i] = cle;
-    if(cle && C.V[i] > 0 && !(A && !A.ok && cle === A.cle)){
+    // Periode chargee en entier jusqu'ici : entamee dans l'heure (ou completee
+    // par le fichier minute), sans barre de comblement ; dans une semaine ou un
+    // mois, chaque seance entamee dans l'heure, la precedente allee jusqu'a sa
+    // fin, sans jour ouvre manquant entre elles. Sinon masquee jusqu'a la suivante.
+    // ponytail: seule la premiere periode du graphe se complete par le fichier minute ; plus loin, une seance entamee en retard (jour partiel d'un graphe en ticks) est masquee, et un trou au milieu d'une seance sans barre de comblement passe inapercu.
+    var ok = !!cle && !b._trou;
+    if(ok && !suite) ok = ecart(r.anc, F, date, +b.m, dur) < DEBUT_MAX || (A0 === A && A.ok);
+    else if(ok) ok = C.ok[i - 1] === 1 && (C.sessAt[i - 1] === sess || (+prev.m >= dur - FIN_MAX && +b.m < DEBUT_MAX && manquent(String(prev._date).slice(0, 10), date) <= 1));
+    C.ok[i] = ok ? 1 : 0;
+    if(ok && C.V[i] > 0){
       var vw = C.PV[i] / C.V[i];
       C.vwap[i] = vw; C.sd[i] = Math.sqrt(Math.max(0, C.PV2[i] / C.V[i] - vw * vw));
     } else { C.vwap[i] = NaN; C.sd[i] = NaN; }
