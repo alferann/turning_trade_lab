@@ -93,18 +93,19 @@ function versET(min, tz, date){
   return ((min - decalage(tz, date) + decalage(ET, date)) % 1440 + 1440) % 1440;
 }
 
-// Sessions actives d'une date, en minutes de seance du graphe [a, b) : celles
-// de TT, sinon DEFAUTS. Chacune court jusqu'a la suivante ; une fin avant le
-// debut passe le minuit de seance (b > 1440).
+// Sessions d'une date, en minutes de seance du graphe [a, b) : celles de TT,
+// sinon DEFAUTS. `table()` et non `bornes()` : une session decochee dans TT
+// (« Compter cette session ») compte quand meme, seules les cases de l'etude
+// choisissent ce qui s'affiche. Chacune court jusqu'a la suivante ; une fin
+// avant le debut passe le minuit de seance (b > 1440).
 function fenetres(date, ouv){
   var L = null;
   try{
-    if(typeof HFQSessionsMonde !== 'undefined') L = HFQSessionsMonde.bornes(date).map(function(s){ return {id:s.id, nom:s.nom, col:s.col, d:s.debut / 60, f:s.fin / 60}; });
+    if(typeof HFQSessionsMonde !== 'undefined') L = HFQSessionsMonde.table().map(function(s){ return {id:s.id, nom:s.nom, col:s.col, d:HFQSessionsMonde.debutET(s, date) / 60}; });
   }catch(_){ L = null; }
-  if(!L){
-    L = DEFAUTS.map(function(s){ return {id:s.id, nom:s.nom, col:s.col, d:versET(s.h * 60 + s.m, s.tz, date)}; }).sort(function(a, b){ return a.d - b.d; });
-    L.forEach(function(s, k){ s.f = L[(k + 1) % L.length].d; });
-  }
+  if(!L) L = DEFAUTS.map(function(s){ return {id:s.id, nom:s.nom, col:s.col, d:versET(s.h * 60 + s.m, s.tz, date)}; });
+  L.sort(function(a, b){ return a.d - b.d; });
+  L.forEach(function(s, k){ s.f = L[(k + 1) % L.length].d; });
   return L.map(function(s){
     var a = (s.d - ouv + 1440) % 1440, b = (s.f - ouv + 1440) % 1440;
     return {id:s.id, nom:s.nom, col:s.col, a:a, b:b <= a ? b + 1440 : b};

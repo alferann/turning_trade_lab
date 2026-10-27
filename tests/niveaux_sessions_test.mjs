@@ -102,6 +102,11 @@ const P = plein(E, g(), defaut);
   assert.ok(t.some(v => v.c >= 0 && v.c > v.m), 'une clôture au-delà après la mèche');
   // Same result through TT's module.
   assert.deepEqual(resume(plein(charge(true).E, g(), defaut).D.us), resume(P.D.us), 'avec le module de TT');
+  // Sessions unchecked in TT's panel still count: only the study's own boxes hide them.
+  const { E: O, vc } = charge(true);
+  vm.runInContext('HFQSessionsMonde.ecrire(HFQSessionsMonde.table().map(s => Object.assign(s, {on:false})))', vc);
+  const R = plein(O, g(), defaut);
+  for (const id of ['asie', 'eu', 'us', 'fin']) assert.deepEqual(resume(R.D[id]), resume(P.D[id]), 'session décochée dans TT : ' + id);
 }
 
 // 3. Tokyo moved to 19:00 ET in TT: the close session runs 16:00-19:00 and straddles the
