@@ -227,6 +227,14 @@ function calcul(C, g, r, fin){
   return C;
 }
 
+// Premier index de [deb, fin] dont l'abscisse atteint x, fin + 1 sinon : g.x
+// croit avec l'index. Le footprint passe tout l'historique dans
+// premiere..derniere, pas seulement les barres a l'ecran.
+function borne(g, deb, fin, x){
+  while(deb <= fin){ var m = (deb + fin) >> 1; if(g.x(m) < x) deb = m + 1; else fin = m - 1; }
+  return deb;
+}
+
 // Remplit entre deux polylignes de meme longueur, un polygone par tronçon continu.
 function remplir(g, A, B, col, op){
   var c = g.ctx, n = A.length, i = 0, k;
@@ -292,6 +300,9 @@ function instance(lettre, d){
       calcul(C, g, r, maintenant() + BUDGET_MS);
       if(C.n < (g.n | 0)){ redessiner(); return; }
       var n = C.n, deb = Math.max(0, g.premiere | 0), fin = Math.min(g.derniere | 0, n - 1), i, j, k;
+      // Une barre de part et d'autre du cadre, pour que les traits en sortent.
+      deb = Math.max(deb, borne(g, deb, fin, g.cadre.gauche) - 1);
+      fin = Math.min(fin, borne(g, deb, fin, g.cadre.droite));
       if(fin < deb) return;
       var seule = null;
       if(r.hist === 'cour') for(i = n - 1; i >= 0 && !seule; i--) seule = C.cle[i];
