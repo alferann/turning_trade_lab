@@ -15,6 +15,7 @@
 | Divergences CVD | `extensions/cvd_div.js` | Divergences entre le prix et le delta cumulé (UE, UA, DE, DA), suivies jusqu'à confirmation ou cassure, avec notifications ; volet CVD dans le même fichier | [`docs/divergences_cvd.md`](docs/divergences_cvd.md) |
 | POC par barre | `extensions/poc_barre.js` | Le prix le plus échangé de chaque barre, en trait sur la largeur du corps de la bougie ; une couleur ou teinté par le delta | [`docs/poc_barre.md`](docs/poc_barre.md) |
 | Profil de volume par période | `extensions/profil_periode.js` | Profil de volume de la séance, d'une séance US, Asie ou Europe, de la semaine ou du mois ; acheteurs et vendeurs empilés, POC, VAH et VAL, périodes précédentes ; quatre instances à superposer | [`docs/profil_periode.md`](docs/profil_periode.md) |
+| Hauts et bas des sessions précédentes | `extensions/niveaux_sessions.js` | Haut et bas de la dernière session close de Tokyo, Londres, New York et de la clôture, prolongés jusqu'au premier toucher ou à la première clôture au-delà ; notifications au choix | [`docs/niveaux_sessions.md`](docs/niveaux_sessions.md) |
 
 ## Installer
 
@@ -36,6 +37,7 @@ node tests/pivots_test.mjs
 node tests/cvd_div_test.mjs
 node tests/poc_barre_test.mjs
 node tests/profil_periode_test.mjs
+node tests/niveaux_sessions_test.mjs   # charge aussi les sessions du monde de Turning Trade (TT_PAYLOAD)
 node tests/i18n_test.mjs   # anglais de toutes les études, comparé au dictionnaire de Turning Trade (TT_PAYLOAD)
 ```
 
@@ -64,6 +66,7 @@ Third-party studies for [Turning Trade](https://turningtrade.com), the futures t
 | CVD Divergences | `extensions/cvd_div.js` | Divergences between price and cumulative delta (UE, UA, DE, DA), tracked until confirmed or broken, with notifications; CVD pane in the same file | [`docs/divergences_cvd.md`](docs/divergences_cvd.md) |
 | Bar POC | `extensions/poc_barre.js` | The most traded price of each bar, as a line across the candle body; one color or tinted by the delta | [`docs/poc_barre.md`](docs/poc_barre.md) |
 | Period Volume Profile | `extensions/profil_periode.js` | Volume profile of the session, a US, Asian or European session, the week or the month; buyers and sellers stacked, POC, VAH and VAL, previous periods; four instances to stack | [`docs/profil_periode.md`](docs/profil_periode.md) |
+| Previous Session Highs and Lows | `extensions/niveaux_sessions.js` | High and low of the last closed Tokyo, London, New York and close session, extended until the first touch or the first close beyond; optional notifications | [`docs/niveaux_sessions.md`](docs/niveaux_sessions.md) |
 
 The getting-started guides are in French first, then in English.
 
@@ -87,6 +90,7 @@ node tests/pivots_test.mjs
 node tests/cvd_div_test.mjs
 node tests/poc_barre_test.mjs
 node tests/profil_periode_test.mjs
+node tests/niveaux_sessions_test.mjs   # also loads Turning Trade's world sessions (TT_PAYLOAD)
 node tests/i18n_test.mjs   # English of every study, checked against Turning Trade's dictionary (TT_PAYLOAD)
 ```
 
