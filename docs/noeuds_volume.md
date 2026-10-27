@@ -36,6 +36,7 @@ Pour la décision : chercher les réactions aux bords (ledges, bords d'un HVN) p
 - **Shelf** : zone verte, du ledge au bout du palier.
 - **Étiquettes** au bord droit, suivies de `· SVP`, `· CVP` ou `· CMP 90` quand plusieurs profils sont suivis ; une étiquette trop proche de la précédente saute.
 - Sans panneau ouvert, un message gris en haut à gauche le dit.
+- Un profil que le graphe ne charge pas en entier n'est pas analysé : à la place de ses nœuds, une ligne grise en haut à gauche en donne la raison, « séance chargée en partie » ou « composite chargé en partie », suivie du nombre de séances trouvées sur le nombre demandé, ou de la date de la séance en cause.
 
 ## Configurer
 
@@ -60,6 +61,8 @@ Chaque sous-section finit par sa couleur : orange, violet, bleu clair, vert par 
 
 ### Limites connues
 
+- **Profil incomplet, nœuds masqués.** Le profil de séance (SVP) est celui de la séance de la dernière barre à l'écran, comme dans TT : il n'est analysé que si elle est chargée depuis sa première heure et, si elle est close, jusqu'à moins de 4 h de sa fin (une clôture anticipée de jour férié passe). Une séance prise en cours (historique qui commence en pleine séance, NQ le 27/10 à partir de 03:21), tronquée (ES le 22/10 arrêté à 07:37) ou le blanc dont TT comble un jour absent ne donnent donc rien. Le composite (CMP) n'est analysé que si TT y trouve autant de séances que demandé (de 5 à 260) et si chaque séance du graphe qu'il contient est chargée en entier, celle en cours depuis son ouverture ; un jour absent du graphe que TT comble par un blanc n'y entre pas, TT le prend dans son archive journalière ou s'en passe. Sur le footprint, qui ne date pas ses barres, seule la séance en cours est vérifiée : les jours passés du composite y viennent de l'archive journalière de TT.
+- La fenêtre visible (CVP) n'est pas vérifiée : son profil est par définition celui des barres à l'écran, et un jour que TT comble par un blanc s'y voit comme un trou.
 - L'étude lit les panneaux par une interface interne de TT (`HFQVPPanels`, `caVppBundle`, `fpVppBundle`) : une mise à jour de TT peut la casser, le message « profil de volume indisponible sur ce graphe » le signale.
 - Seuils en rangées : un même réglage donne des nœuds plus larges en prix sur un composite que sur une séance. Les seuils de 10 % et 25 % sont fixes.
 - Le composite se recalcule une fois par séance du graphe, une seule fois par graphe sur le footprint qui ne date pas ses barres. TT met environ 0,6 s à le construire sur 90 séances : le premier affichage peut marquer un temps. Pendant que l'historique en ticks se remplit, il se recalcule aussi, mais au plus une fois par minute.
@@ -104,6 +107,7 @@ For the decision: look for reactions at the edges (ledges, HVN edges) rather tha
 - **Shelf**: green zone, from the ledge to the end of the plateau.
 - **Labels** at the right edge, followed by `· SVP`, `· CVP` or `· CMP 90` when several profiles are followed; a label too close to the previous one is skipped.
 - With no panel open, a grey message at the top left says so.
+- A profile the chart does not load entirely is not analysed: instead of its nodes, a grey line at the top left gives the reason, "session partly loaded" or "composite partly loaded", followed by the number of sessions found against the number asked, or by the date of the session at fault.
 
 ## Settings
 
@@ -128,6 +132,8 @@ Each sub-section ends with its colour: orange, purple, light blue, green by defa
 
 ### Known limits
 
+- **Incomplete profile, nodes hidden.** The session profile (SVP) is that of the session of the last bar on screen, as in TT: it is analysed only if that session is loaded from its first hour and, once closed, to less than 4 h before its end (an early holiday close still counts). A session joined late (a history starting mid-session, NQ on 10/27 from 03:21), cut (ES on 10/22 stopped at 07:37) or the blank TT fills a missing day with therefore gives nothing. The composite (CMP) is analysed only if TT finds as many sessions as asked (5 to 260) and every chart session it holds is fully loaded, the current one from its open; a day missing from the chart that TT fills with a blank is not part of it, TT takes it from its daily archive or does without. On the footprint, which does not date its bars, only the current session is checked: the composite's past days come from TT's daily archive there.
+- The visible window (CVP) is not checked: its profile is by definition that of the bars on screen, and a day TT fills with a blank shows in it as a gap.
 - The study reads the panels through an internal TT interface (`HFQVPPanels`, `caVppBundle`, `fpVppBundle`): a TT update may break it, and the message "volume profile unavailable on this chart" says so.
 - Thresholds in rows: the same setting gives wider nodes in price on a composite than on a session. The 10 % and 25 % thresholds are fixed.
 - The composite is rebuilt once per chart session, only once per chart on the footprint, which does not date its bars. TT takes about 0.6 s to build it over 90 sessions: the first display may pause. While tick history fills in, it is rebuilt too, at most once a minute.

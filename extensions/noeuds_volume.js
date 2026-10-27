@@ -12,6 +12,11 @@
 // rupture nette, le volume moyen de quelques rangees d'un cote de la limite
 // vaut un multiple de celui de l'autre cote. Shelf : palier plat adosse a un
 // ledge, du cote epais.
+//
+// Rien n'est tire d'un profil que le graphe ne charge pas en entier : seance
+// prise en cours, tronquee ou comblee par TT, composite qui compte moins de
+// seances que demande ou qui contient une seance du graphe chargee en partie.
+// Le profil est masque et la raison s'affiche en haut a gauche.
 (function(){
 
 // ponytail: seuils fixes en part du volume du POC : profondeur mini d'un LVN,
@@ -32,6 +37,11 @@ var INSERE_MS = 60000;
 // dezoomee. Apres une image froide, la suivante se sert du cache.
 var FROIDE = false;
 var COURT = {session:'SVP', visible:'CVP', rolling:'CMP'};
+// ponytail: duree de la seance du graphe en minutes, 23 h en ETH et 6 h 30 en RTH (ES, NQ).
+var DUREE = {eth:1380, rth:390};
+// Une seance est complete si ses barres partent dans la premiere heure et,
+// close, vont jusqu'a 4 h de la fin (regle de pivots.js).
+var MARGE = [60, 240];
 var FILET = ' ────────────────────';
 var CACHE = {};
 
@@ -51,7 +61,9 @@ var EN = {
   'Hauteur mini (rangées)':'Minimum height (rows)', 'Écart toléré sur le palier (%)':'Tolerated spread on the plateau (%)',
   'Ledge haut':'Upper ledge', 'Ledge bas':'Lower ledge',
   'Nœuds VP : aucun panneau de profil ouvert':'VP nodes: no profile panel open',
-  'Nœuds VP : profil de volume indisponible sur ce graphe':'VP nodes: volume profile unavailable on this chart'
+  'Nœuds VP : profil de volume indisponible sur ce graphe':'VP nodes: volume profile unavailable on this chart',
+  'Nœuds VP : séance chargée en partie':'VP nodes: session partly loaded',
+  'Nœuds VP : composite chargé en partie':'VP nodes: composite partly loaded'
 };
 EN['HVN : nœuds de volume élevé' + FILET] = 'HVN: high volume nodes' + FILET;
 EN['LVN : nœuds de volume faible' + FILET] = 'LVN: low volume nodes' + FILET;
@@ -218,6 +230,52 @@ function portees(r){
 
 var DETECTION = ['lissage', 'hvnProm', 'lvnMur', 'ledgeRatio', 'ledgeK', 'shelfMin', 'shelfTol'];
 
+// Meme seance que la barre p : meme date sur les bougies, minutes qui ne
+// repartent pas en arriere sur le footprint qui ne date pas ses barres.
+function suite(p, b){ return !!(p && b) && (b._date != null ? b._date === p._date : +b.m >= +p.m); }
+function debut(g, i){ while(i > 0 && suite(g.barre(i - 1), g.barre(i))) i--; return i; }
+
+// Vrai si la seance [a, z] est chargee en entier : premiere barre dans l'heure
+// qui suit l'ouverture et, si une seance la suit, derniere barre a moins de 4 h
+// de la fin. Le bloc dont TT comble un jour absent est une seance a part, toute
+// a la minute 0 : il echoue sur la fin. Pas de test de `_trou` dans la seance :
+// en rejeu, TT le pose sur la barre en cours.
+function entiere(g, a, z){
+  return +g.barre(a).m <= MARGE[0] && (z === (g.n | 0) - 1 || +g.barre(z).m >= (DUREE[g.seance] || DUREE.eth) - MARGE[1]);
+}
+
+// Seance du profil SVP : celle de la derniere barre a l'ecran, comme TT. Le
+// footprint passe tout l'historique : la derniere barre visible se cherche sur g.x.
+function seanceVue(g){
+  var deb = Math.max(0, g.premiere | 0), fin = Math.min(g.derniere | 0, (g.n | 0) - 1), lo = deb, hi = fin;
+  while(lo <= hi){ var m = (lo + hi) >> 1; if(g.x(m) <= g.cadre.droite) lo = m + 1; else hi = m - 1; }
+  var z = Math.max(deb, lo - 1);
+  while(z < (g.n | 0) - 1 && suite(g.barre(z), g.barre(z + 1))) z++;
+  return [debut(g, z), z];
+}
+
+// Raison de masquer un profil que le graphe ne charge pas en entier, null
+// s'il l'est. Seance : celle du SVP. Composite : TT dit combien de seances il
+// a trouvees (`days`) sur combien demandees (`daysAsked`) ; les seances du
+// graphe depuis sa premiere date doivent etre entieres, celle en cours partie
+// de son ouverture. Une seance comblee par TT (jour absent du graphe) n'y est pas.
+// ponytail: sur le footprint, sans dates, seule la seance en cours est verifiee ; les jours passes du composite y viennent de l'archive journaliere de TT.
+function manque(g, scope, b){
+  var n = g.n | 0, S;
+  if(!n || scope === 'visible') return null;
+  if(scope === 'session'){ S = seanceVue(g); return entiere(g, S[0], S[1]) ? null : ['Nœuds VP : séance chargée en partie', '']; }
+  if(!b) return null;
+  if(b.days < b.daysAsked) return ['Nœuds VP : composite chargé en partie', b.days + '/' + b.daysAsked];
+  for(var z = n - 1; z >= 0; z = S - 1){
+    S = debut(g, z);
+    var d = g.barre(S)._date;
+    if(d && b.dateFrom && d < b.dateFrom) break;
+    if(!g.barre(S)._trou && !entiere(g, S, z)) return ['Nœuds VP : composite chargé en partie', d || ''];
+    if(!d) break;
+  }
+  return null;
+}
+
 function profil(g, por, fn, r, froide){
   var n = g.n | 0, last = n ? g.barre(n - 1) : null, base = [g.sym, g.tf, g.seance].join('|');
   var fixe = por.scope === 'rolling' ? last && last._date || '' : n + (por.scope === 'visible' ? ':' + g.premiere + ':' + g.derniere : '');
@@ -227,14 +285,18 @@ function profil(g, por, fn, r, froide){
   var insere = C && por.scope === 'rolling' && C.n > 0 && n >= C.n && cleBarre(g.barre(C.n - 1)) !== C.der && t - C.t >= INSERE_MS;
   var perime = C && (C.fixe !== fixe || insere || (C.vif !== vif && por.scope !== 'rolling' && t - C.t >= VIF_MS));
   if(!C || C.base !== base || (perime && !froide)){
-    var b = null;
-    try{ b = fn(por.scope, {days:por.days || 90}); }catch(_){ b = null; }
-    C = CACHE[por.cle] = {base:base, fixe:fixe, vif:vif, t:t, n:n, der:cleBarre(last), P:b && b.profile || null, cleR:'', N:null};
+    // Une seance incomplete ne demande meme pas son profil a TT.
+    var b = null, raison = por.scope === 'session' ? manque(g, por.scope, null) : null;
+    if(!raison){
+      try{ b = fn(por.scope, {days:por.days || 90}); }catch(_){ b = null; }
+      raison = manque(g, por.scope, b);
+    }
+    C = CACHE[por.cle] = {base:base, fixe:fixe, vif:vif, t:t, n:n, der:cleBarre(last), P:b && b.profile || null, raison:raison, cleR:'', N:null};
     FROIDE = true;
   }
   var cleR = DETECTION.map(function(k){ return r[k]; }).join('|');
   if(C.cleR !== cleR){ C.cleR = cleR; C.N = C.P ? detecter(C.P, r) : null; }
-  return C.N;
+  return C;
 }
 
 // Liste des profils suivis et de leurs noeuds, ou la raison de l'absence.
@@ -245,8 +307,9 @@ function calcul(g, r){
   FROIDE = false;
   if(!S.length) return {raison:'Nœuds VP : aucun panneau de profil ouvert', profils:[]};
   for(var i = 0; i < S.length; i++){
-    var N = profil(g, S[i], fn, r, froide);
-    if(N) out.push({nom:COURT[S[i].scope] + (S[i].days ? ' ' + S[i].days : ''), noeuds:N});
+    var C = profil(g, S[i], fn, r, froide), nom = COURT[S[i].scope] + (S[i].days ? ' ' + S[i].days : '');
+    if(C.raison) out.push({nom:nom, noeuds:null, raison:C.raison[0], detail:C.raison[1]});
+    else if(C.N) out.push({nom:nom, noeuds:C.N});
   }
   return {raison:null, profils:out};
 }
@@ -276,13 +339,18 @@ var def = {
       {k:'shelfMin', label:'Hauteur mini (rangées)', type:'number', defaut:4, min:2, max:40, pas:1},
       {k:'shelfTol', label:'Écart toléré sur le palier (%)', type:'number', defaut:25, min:5, max:60, pas:1}], '#4bd48e')),
   calcul:calcul,
-  outils:{detecter:detecter, lisser:lisser},
+  outils:{detecter:detecter, lisser:lisser, manque:manque},
   dessine:function(g, r){
     var R = calcul(g, r), F = g.cadre, e = g.echelle || 1, etiq = [];
     if(R.raison){ g.texte(F.gauche + 8 * e, F.haut + 14 * e, tr(R.raison), {couleur:'#8a929c', taille:10}); return; }
-    var suffixe = R.profils.length > 1;
+    var suffixe = R.profils.length > 1, ligne = 0;
     for(var p = 0; p < R.profils.length; p++){
       var N = R.profils[p].noeuds, nom = suffixe ? ' · ' + R.profils[p].nom : '';
+      // Profil masque : sa raison, une ligne par profil, a la place de ses noeuds.
+      if(!N){
+        g.texte(F.gauche + 8 * e, F.haut + (14 + 13 * ligne++) * e, tr(R.profils[p].raison) + (R.profils[p].detail ? ' (' + R.profils[p].detail + ')' : '') + nom, {couleur:'#8a929c', taille:10});
+        continue;
+      }
       // Des zones larges aux traits fins, pour que les ledges restent au-dessus.
       var types = ['shelf', 'hvn', 'lvn', 'ledge'];
       for(var t = 0; t < types.length; t++){
