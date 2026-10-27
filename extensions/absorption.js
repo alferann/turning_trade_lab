@@ -99,12 +99,25 @@ function jour(cle){
   return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null;
 }
 
-// Jours de semaine strictement entre deux dates : une seance manque entre elles.
-// ponytail: les feries comptent ; le lendemain d'un ferie, les zones de la veille s'arretent.
+// Jours de fermeture complete du CME (Jour de l'An, Vendredi saint, Noel,
+// reports compris), lus dans le calendrier de TT (HFQSessions.feriesUS) ; les
+// seances ecourtees restent ouvrees. Sans ce calendrier, tout jour de semaine l'est.
+var FERMES = {};
+function ouvre(ms){
+  var d = new Date(ms), an = d.getUTCFullYear();
+  if(!(d.getUTCDay() % 6)) return false;
+  if(!FERMES[an]){
+    FERMES[an] = {};
+    try{ HFQSessions.feriesUS(an).forEach(function(f){ if(f.type === 'ferme') FERMES[an][f.date] = 1; }); }catch(_){}
+  }
+  return !FERMES[an][d.toISOString().slice(0, 10)];
+}
+
+// Jours ouvres strictement entre deux dates : une seance manque entre elles.
 function ouvresEntre(a, b){
   var d = jour(a), f = jour(b), n = 0;
   if(d === null || f === null) return 0;
-  for(d += 864e5; d < f; d += 864e5) if(new Date(d).getUTCDay() % 6) n++;
+  for(d += 864e5; d < f; d += 864e5) if(ouvre(d)) n++;
   return n;
 }
 

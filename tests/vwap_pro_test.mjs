@@ -7,6 +7,8 @@ import path from 'node:path';
 
 const RACINE = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const SRC = fs.readFileSync(path.join(RACINE, 'extensions/vwap_pro.js'), 'utf8');
+// TT's market calendar (hfq-sessions.js): full CME closures (New Year, Good Friday, Christmas) are no missing day.
+const HFQSessions = (() => { const c = {}; vm.runInContext(fs.readFileSync(path.join(process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Terminal/payload', 'hfq-sessions.js'), 'utf8'), vm.createContext(c)); return c.HFQSessions; })();
 const DB = path.join(process.env.TT_DATA || path.join(process.env.HOME, '.local/share/TurningTrade'), '_footprint_db_rec_ES.json');
 
 const db = JSON.parse(fs.readFileSync(DB, 'utf8'));
@@ -19,7 +21,7 @@ const J = e => !e || !e.length ? { n: 0, prix: () => 0, bid: () => 0, ask: () =>
 // No HFQSessionsMonde in the context: the study falls back to its built-in session defaults. fetch serves the
 // one-minute files of FICHIERS only when servir() is awaited, like a request in flight.
 const defs = [], FICHIERS = {}, appels = [], attente = [];
-vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console,
+vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console, HFQSessions,
   HFQSymGuard: { histFile: (t, s) => t + '_' + s + '.json' },
   fetch(f) { appels.push(f); return new Promise(ok => attente.push(() => ok({ json: () => FICHIERS[f] }))); } }));
 const servir = async () => { while (attente.length) attente.shift()(); await new Promise(r => setImmediate(r)); };
@@ -234,14 +236,14 @@ const fin = (C, B, f) => C.vwap[B.findLastIndex(f)];
 
 // 5h. Week completed from the file: every session it brings must be whole and none may be missing. Tick chart from
 // Wednesday 4: masked if the file cuts Tuesday 3 at 07:37 ET or starts it at 23:00; joined at 05:40 that day, masked
-// if the file lacks Wednesday; from Friday 6, masked if Tuesday and Wednesday are both missing, drawn if only
-// Wednesday is (it passes for a holiday).
+// if the file lacks Wednesday; from Friday 6, masked if Tuesday and Wednesday are both missing, or Wednesday alone
+// (a full CME closure would be in TT's calendar).
 {
   const W = avec({ anc: 'sem' }), mer = aplat(RS.slice(2, 5)), ven = aplat([RS[4]]), mer540 = mer.filter(b => b._date !== '2026-11-04' || b.m >= 700);
   const cas = [['coupé', mer, RS.map(s => s.date === '2026-11-03' ? coupe(s, b => b.m < 818) : s), false],
     ['tard', mer, RS.map(s => s.date === '2026-11-03' ? coupe(s, b => b.m >= 300) : s), false],
     ['sans le mercredi', mer540, RS.filter(s => s.date !== '2026-11-04'), false], ['entier', mer540, RS, true],
-    ['deux jours', ven, [RS[0], RS[3]], false], ['un jour', ven, [RS[0], RS[1], RS[3]], true]];
+    ['deux jours', ven, [RS[0], RS[3]], false], ['un jour', ven, [RS[0], RS[1], RS[3]], false]];
   const G = cas.map(([nom, B, S], k) => { FICHIERS['_footprint_eth_W' + k + '.json'] = { sessions: S }; return ticks(B, 'W' + k); });
   G.forEach(x => A.calcul(x, W)); await servir();
   cas.forEach(([nom, B, , ok], k) => traces(A.calcul(G[k], W), B, () => ok, 'fichier ' + nom + ' : semaine ' + (ok ? 'complétée' : 'masquée')));
@@ -263,7 +265,11 @@ const fin = (C, B, f) => C.vwap[B.findLastIndex(f)];
   traces(A.calcul(g(T), defaut), T, b => !b._trou, 'jour manquant : les autres séances tracées');
   const D = aplat([RS[0], RS[3]]), U = aplat([RS[0], RS[2]]);
   traces(A.calcul(g(D), W), D, b => b._date === '2026-11-02', 'mardi et mercredi sans séance : semaine masquée');
-  traces(A.calcul(g(U), W), U, () => true, 'mardi sans séance : férié, semaine tracée');
+  traces(A.calcul(g(U), W), U, b => b._date === '2026-11-02', 'mardi sans séance : semaine masquée ensuite');
+  // A full CME closure is no missing day: Good Friday 2026-04-03 (TT's calendar) inside the week and the month.
+  const GF = aplat(['2026-03-30', '2026-03-31', '2026-04-01', '2026-04-02', '2026-04-06'].map((date, k) => ({ date, bars: RS[k % RS.length].bars })));
+  traces(A.calcul(g(GF), avec({ anc: 'mois' })), GF, b => b._date >= '2026-04-01', 'Vendredi saint : avril tracé, mars partiel masqué');
+  traces(A.calcul(g(GF.filter(b => b._date >= '2026-03-30' && b._date <= '2026-04-02')), W), GF.filter(b => b._date <= '2026-04-02'), () => true, 'semaine du Vendredi saint tracée');
   // A holiday early close at 13:15 ET (last bar m 1154) is a whole session: the week goes on, in the chart as from the file.
   const H = aplat([RS[0], coupe(RS[1], b => b.m < 1155), RS[2]]);
   traces(A.calcul(g(H), W), H, () => true, 'clôture anticipée à 13:15 : semaine tracée');

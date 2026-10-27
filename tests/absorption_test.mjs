@@ -10,6 +10,8 @@ import path from 'node:path';
 
 const RACINE = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const SRC = fs.readFileSync(path.join(RACINE, 'extensions/absorption.js'), 'utf8');
+// TT's market calendar (hfq-sessions.js): full CME closures (New Year, Good Friday, Christmas) are no missing day.
+const HFQSessions = (() => { const c = {}; vm.runInContext(fs.readFileSync(path.join(process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Terminal/payload', 'hfq-sessions.js'), 'utf8'), vm.createContext(c)); return c.HFQSessions; })();
 const DATA = process.env.TT_DATA || path.join(process.env.HOME, '.local/share/TurningTrade');
 const TICK = 0.25;
 
@@ -34,7 +36,7 @@ function charger() {
   };
   class Notification { constructor(titre, o) { pushes.push({ titre, texte: o && o.body }); } }
   Notification.permission = 'granted';
-  vm.runInContext(SRC, vm.createContext({ HFQExt, window: {}, Notification, performance, console }));
+  vm.runInContext(SRC, vm.createContext({ HFQExt, window: {}, Notification, performance, console, HFQSessions }));
   return { abs: defs.find(d => d.id === 'absorption'), rep: defs.find(d => d.id === 'absorption-reprise') };
 }
 let { abs, rep } = charger();
@@ -286,6 +288,7 @@ function ruban(T) {
   assert.deepEqual(zone(date(avant, '2026-10-06').concat(date(apres, '2026-10-08'))).map(e => e.fin), [124], 'mercredi manquant');
   assert.deepEqual(zone(date(avant, '2026-10-06', '_sd').concat(date(apres, '2026-10-08', '_sd'))).map(e => e.fin), [124], 'footprint : mercredi manquant vu par _sd');
   assert.deepEqual(zone(date(avant, '2026-10-09').concat(date(apres, '2026-10-12'))).map(e => e.fin), [-1], 'week-end : la zone tient');
+  assert.deepEqual(zone(date(avant, '2026-04-02').concat(date(apres, '2026-04-06'))).map(e => e.fin), [-1], 'Vendredi saint (calendrier de TT) : la zone tient');
   // Level defended: two tests before the gap and one after are not three tests.
   mn = 0;
   const niv = fond(120).concat([test(), hausse(5000), test()]), fin = [test(), forme(5000)];

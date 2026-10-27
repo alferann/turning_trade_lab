@@ -9,6 +9,8 @@ import path from 'node:path';
 
 const RACINE = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const SRC = fs.readFileSync(path.join(RACINE, 'extensions/profil_periode.js'), 'utf8');
+// TT's market calendar (hfq-sessions.js): full CME closures (New Year, Good Friday, Christmas) are no missing day.
+const HFQSessions = (() => { const c = {}; vm.runInContext(fs.readFileSync(path.join(process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Terminal/payload', 'hfq-sessions.js'), 'utf8'), vm.createContext(c)); return c.HFQSessions; })();
 const DB = path.join(process.env.TT_DATA || path.join(process.env.HOME, '.local/share/TurningTrade'), '_footprint_db_rec_ES.json');
 const PAYLOAD = process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Terminal/payload';
 
@@ -21,7 +23,7 @@ const kPlein = db.sessions.findLastIndex(s => s.bars.some(b => b.m >= 1320)), pl
 const iPlein = bars.findIndex(b => b._date === plein.date), BP = bars.slice(0, iPlein + plein.bars.length);
 
 // Each context gets its own study instances; `extra` adds globals such as HFQSessionsMonde.
-const charger = (extra = {}) => { const defs = []; vm.runInContext(SRC, vm.createContext(Object.assign({ HFQExt: { etude(d) { defs.push(d); return true; } }, console, performance }, extra))); return defs; };
+const charger = (extra = {}) => { const defs = []; vm.runInContext(SRC, vm.createContext(Object.assign({ HFQExt: { etude(d) { defs.push(d); return true; } }, console, performance, HFQSessions }, extra))); return defs; };
 const defs = charger();
 assert.deepEqual(defs.map(d => d.id), ['profil-periode', 'profil-periode-b', 'profil-periode-c', 'profil-periode-d'], 'ids stables');
 assert.deepEqual(defs.map(d => d.reglages[0].defaut), ['jour', 'sem', 'mois', 'us'], 'période par défaut de chaque instance');
@@ -283,13 +285,13 @@ const vue = (B, r, o = {}) => { const G = g(B, Object.assign({ premiere: 0 }, o)
   assert.equal(X(aplat([NOV[0], coupe(NOV[1], b => b.m <= 1000)]), avec({ periode: 'us' })).cour.partiel, null, 'RTH en cours : tracée');
 
   // Weeks: a session cut at 07:37 ET, a missing day (TT's filler bars, also outside the RTH window), a session joined
-  // late or two weekdays without a session make the week incomplete, named in the caption; a lone missing weekday
-  // passes for a holiday. A week that does not start on its Monday further on is partial.
+  // late or a weekday without a session make the week incomplete, named in the caption; a full CME closure from
+  // TT's calendar does not. A week that does not start on its Monday further on is partial.
   const W = avec({ periode: 'sem' }), WR = avec({ periode: 'sem', rth: true });
   const TR = [...aplat([NOV[0]]), ...trous('2026-11-03'), ...aplat([NOV[2]])];
   const cas = [['coupée', aplat([NOV[0], coupe(NOV[1], b => b.m < 818), NOV[2]]), W, '2026-11-03'], ['comblée', TR, W, '2026-11-03'],
     ['comblée, RTH seul', TR, WR, '2026-11-03'], ['entamée à 05:40', aplat([NOV[0], coupe(NOV[1], b => b.m >= 700), NOV[2]]), W, '2026-11-03'],
-    ['mardi et mercredi sans séance', aplat([NOV[0], NOV[3]]), W, '2026-11-05'], ['mardi sans séance', aplat([NOV[0], NOV[2]]), W, null],
+    ['mardi et mercredi sans séance', aplat([NOV[0], NOV[3]]), W, '2026-11-05'], ['mardi sans séance', aplat([NOV[0], NOV[2]]), W, '2026-11-04'],
     ['clôture anticipée à 13:15', aplat([NOV[0], coupe(NOV[1], b => b.m < 1155), NOV[2]]), W, null]];
   for (const [nom, B, r, date] of cas) assert.deepEqual([X(B, r).cour.incomplet, X(B, r).cour.partiel], [date, null], 'semaine ' + nom);
   assert.equal(X(aplat([...NOV.slice(0, 5), NOV[6]]), W).cour.partiel, '2026-11-10', 'semaine 46 sans son lundi : partielle');
@@ -332,16 +334,18 @@ const vue = (B, r, o = {}) => { const G = g(B, Object.assign({ premiere: 0 }, o)
 
   // Week from a tick chart: from Wednesday 4, masked if the file cuts Tuesday 3 at 07:37 ET or starts it at 23:00,
   // or, joined at 05:40 on the 4th, lacks Wednesday; from Friday 6, masked if Tuesday and Wednesday are both
-  // missing, completed if only Wednesday is.
+  // missing, and if only Wednesday is; completed across Good Friday, a full CME closure in TT's calendar.
   const Wk = avec({ periode: 'sem' }), d4 = aplat(NOV.slice(2, 5)), d4b = aplat([mer, NOV[3], NOV[4]]), d6 = aplat([NOV[4]]);
   const du3 = f => NOV.map(s => s.date === '2026-11-03' ? coupe(s, f) : s);
   const cas = [['coupé', d4, du3(b => b.m < 818), '2026-11-04'], ['tard', d4, du3(b => b.m >= 300), '2026-11-04'],
     ['sans le mercredi', d4b, NOV.filter(s => s.date !== '2026-11-04'), '2026-11-04'], ['entier', d4b, NOV, null],
-    ['deux jours', d6, [NOV[0], NOV[3]], '2026-11-06'], ['un jour', d6, [NOV[0], NOV[1], NOV[3]], null]];
+    ['deux jours', d6, [NOV[0], NOV[3]], '2026-11-06'], ['un jour', d6, [NOV[0], NOV[1], NOV[3]], '2026-11-06']];
   const GW = cas.map(([, B, S], k) => ticks(B, 'NW' + k, S));
   GW.forEach(x => cour(x, Wk, D)); await servir();
   cas.forEach(([nom, , , partiel], k) => assert.equal(cour(GW[k], Wk, D).partiel, partiel, 'fichier ' + nom));
-  egal(cour(GW[5], Wk, D), reference(aplat([NOV[0], NOV[1], NOV[3], NOV[4]])), 'semaine complétée sans le mercredi férié');
+  const AV = ['2026-03-30', '2026-03-31', '2026-04-01', '2026-04-02', '2026-04-06'].slice(2).map((date, k) => ({ date, bars: NOV[k].bars })), GA = ticks(aplat([AV[2]]), 'GF', AV.slice(0, 2));
+  cour(GA, avec({ periode: 'mois' }), D); await servir();
+  egal(cour(GA, avec({ periode: 'mois' }), D), reference(aplat(AV)), 'avril complété par-dessus le Vendredi saint');
   egal(cour(GW[3], Wk, D), reference(aplat(NOV.slice(0, 5))), 'semaine complétée depuis le 4 à 05:40');
 }
 
