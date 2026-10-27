@@ -46,9 +46,16 @@ function g(B, premiere, derniere, rec) {
     barre: i => B[i] || null, niveaux: i => J(B[i] && B[i].lv), x: i => i, y: v => v,
     trait(p, o) { rec.push({ k: 'trait', p, o }); }, texte(x, y, s) { rec.push({ k: 'texte', x, s }); } };
 }
+// Draws until the study stops asking for a redraw (its lead may be read over several frames under load) and
+// returns the records of the last frame.
+function image(def, B, premiere, derniere, r) {
+  let rec = [];
+  demandes = 1;
+  for (let k = 0; demandes && k < 50; k++) { demandes = 0; rec = []; def.dessine(g(B, premiere, derniere, rec), r); }
+  return rec;
+}
 function signaux(def, r, B = bars, premiere = 300, derniere = B.length - 1) {
-  surch = r; const rec = [];
-  def.dessine(g(B, premiere, derniere, rec), Object.assign(defaut(def), r));
+  surch = r; const rec = image(def, B, premiere, derniere, Object.assign(defaut(def), r));
   const out = [];
   for (let i = 0; i < rec.length - 1; i++) {
     const t = rec[i], e = rec[i + 1];
@@ -272,10 +279,126 @@ function tapeReelle(sym, date) {
     assert.ok(n > 1 && !suspFroid && !suspendue, 'budget mèches 8 ms, pire image ' + froid.toFixed(2) + ' chaud ' + chaud.toFixed(2));
     ({ prix, cvd } = charger()); surch = {};
     const fin = meches(B, P, {}, B.length - 30);
-    // The CVD starts at the window start, so a shifted window shifts the wicks: compare their spans.
-    const long = w => w && w[1] - w[0];
-    assert.ok(Object.keys(fin).length > 0 && Object.keys(fin).every(i => long(M[i]) === long(fin[i])), 'rattrapage = passage direct sur les barres visibles');
+    // The CVD is cumulated from its anchor whatever the window start, so the wicks land at the same levels.
+    assert.ok(Object.keys(fin).length > 0 && Object.keys(fin).every(i => M[i] && M[i][0] === fin[i][0] && M[i][1] === fin[i][1]), 'rattrapage = passage direct sur les barres visibles');
     console.log('  mèches ES', date2, ':', R2.cs.length, 'prints,', Object.keys(M).length, 'barres |', n, 'images de rattrapage, pire', froid.toFixed(2), 'ms, chaud', chaud.toFixed(2), 'ms');
+  }
+}
+
+// 12. Anchored CVD and missing data. The pane's CVD starts at its anchor even when the screen and its 300-bar
+// lead start after it. A CVD session not loaded from its anchor, holed (over 10 minutes beyond a bar, TT's rule),
+// with filler bars or bars without levels (delta unknown) has no CVD nor divergence from there on, and the
+// caption says so. Two whole archive sessions, redated on consecutive business days.
+{
+  const pleine = s => s.bars[0].m === 0 && s.bars.at(-1).m >= 1320 && s.bars.every((b, k) => !k || b.m - s.bars[k - 1].m <= 11);
+  const P2 = db.sessions.filter(pleine).slice(-2), JR = ['2026-11-05', '2026-11-06'];
+  assert.equal(P2.length, 2, 'deux séances pleines dans l\'archive');
+  const aplat = S => S.flatMap(s => s.bars.map(b => Object.assign({ _date: s.date }, b)));
+  const base = P2.map((s, k) => ({ date: JR[k], bars: s.bars }));
+  const avecJour = (f, S = base) => aplat(S.map((s, j) => j === 1 ? { date: s.date, bars: f(s.bars) } : s));
+  const B = aplat(base), s1 = B.findIndex(b => b._date === JR[1]), a1300 = B.findIndex((b, i) => i >= s1 && b.m >= 1300);
+  // Brute force on whole data: CVD from each anchor, the chart session and 09:30 with the RTH anchor.
+  const ancre = (B, anc) => { const out = {}; let cum = 0, cle = null;
+    B.forEach((b, i) => { const k = b._date + (anc === 'rth' && b.m >= 930 ? 'R' : ''); if (k !== cle) { cum = 0; cle = k; } cum += J(b.lv).deltaTotal(); out[i] = cum; });
+    return out; };
+  // Pane line (style 'ligne', y = CVD) by bar index, and the texts drawn, in a fresh load unless told otherwise.
+  const MSG_VOLET = 'CVD : masqué sur une séance incomplète', MSG_PRIX = 'Divergences CVD : masquées sur une séance incomplète';
+  const volet = (B, premiere, anc = 'rth', frais = true) => {
+    if (frais) ({ prix, cvd } = charger());
+    surch = { anc }; const rl = Object.assign(defaut(cvd), { style: 'ligne' }), rec = image(cvd, B, premiere, B.length - 1, rl);
+    const t = rec.find(x => x.k === 'trait' && x.o.couleur === rl.ccvd);
+    return { cv: Object.fromEntries(t ? t.p.filter(p => isFinite(p[0])) : []), txt: rec.filter(x => x.k === 'texte').map(x => x.s) };
+  };
+  const egal = (V, A, m) => { const k = Object.keys(V.cv); assert.ok(k.length > 50 && k.every(i => V.cv[i] === A[i]), m + ' : ' + k.find(i => V.cv[i] !== A[i])); };
+  // Screen from 13:50 ET, its lead from 08:50: still from 09:30, or from 18:00 with the ETH anchor.
+  for (const anc of ['rth', 'eth']) {
+    const V = volet(B, a1300, anc);
+    egal(V, ancre(B, anc), 'CVD depuis l\'ancrage ' + anc + ', écran après lui');
+    assert.ok(!V.txt.includes(MSG_VOLET), 'données complètes : pas de légende ' + anc);
+  }
+  // Scrolling right, left, into the other session and back, in one load: same levels as a fresh reading.
+  ({ prix, cvd } = charger());
+  for (const p of [a1300, a1300 - 40, a1300 + 25, s1 + 450, 700, a1300 - 200]) egal(volet(B, p, 'eth', false), ancre(B, 'eth'), 'défilement à ' + p);
+  // Joined late (NQ minute history from 03:21 ET on 2026-10-27): with the ETH anchor nothing of that session,
+  // with the RTH anchor its RTH part only, from 09:30.
+  {
+    const Bl = avecJour(b => b.filter(x => x.m >= 561)), l1 = Bl.findIndex(b => b._date === JR[1]), A = ancre(Bl, 'rth');
+    const E = volet(Bl, l1, 'eth'), R = volet(Bl, l1, 'rth');
+    assert.ok(Object.keys(E.cv).length === 0 && E.txt.includes(MSG_VOLET), 'prise à 03:21, ancrage ETH : rien, légende');
+    assert.ok(Object.keys(R.cv).every(i => Bl[i].m >= 930 && R.cv[i] === A[i]) && Object.keys(R.cv).length > 300 && R.txt.includes(MSG_VOLET), 'prise à 03:21, ancrage RTH : RTH seul');
+    const sp = signaux(prix, { conf: 'pivot', anc: 'eth' }, Bl, l1);
+    assert.ok(sp.every(s => s.a < l1 && s.b < l1), 'prise à 03:21 : aucune divergence sur la séance');
+    surch = { anc: 'eth' }; const rec = image(prix, Bl, l1, Bl.length - 1, Object.assign(defaut(prix), { anc: 'eth' }));
+    assert.ok(rec.some(x => x.k === 'texte' && x.s === MSG_PRIX), 'légende sur le prix');
+  }
+  // Inside the second session's RTH from 10:10 ET (m 1000): filler bars (three, too short for the hole rule),
+  // bars without levels, a 30-minute hole. CVD up to there, nothing after; a 5-minute hole passes.
+  const coupe = (nom, Bx, depuis) => {
+    const V = volet(Bx, s1 + 500), A = ancre(Bx, 'rth'), k = Object.keys(V.cv).map(Number);
+    assert.ok(k.some(i => Bx[i].m >= 950 && Bx[i].m < 1000) && k.every(i => !(Bx[i]._date === JR[1] && Bx[i].m >= depuis) && V.cv[i] === A[i]), nom);
+    assert.ok(V.txt.includes(MSG_VOLET), nom + ' : légende');
+  };
+  coupe('barres de comblement', avecJour(b => b.map(x => x.m >= 1000 && x.m < 1003 ? { m: x.m, o: x.o, h: x.o, l: x.o, c: x.o, lv: [], _trou: true } : x)), 1000);
+  coupe('barres sans niveaux', avecJour(b => b.map(x => x.m >= 1000 && x.m < 1003 ? Object.assign({}, x, { lv: [] }) : x)), 1000);
+  coupe('trou de 30 minutes', avecJour(b => b.filter(x => x.m < 1000 || x.m >= 1030)), 1030);
+  const B5 = avecJour(b => b.filter(x => x.m < 1000 || x.m >= 1005));
+  egal(volet(B5, s1 + 500), ancre(B5, 'rth'), 'trou de 5 minutes');
+  // A whole chart without levels keeps its own message.
+  assert.ok(volet(B.map(x => Object.assign({}, x, { lv: [] })), s1).txt.includes('CVD : aucun delta par barre sur ce graphe'), 'graphe sans niveaux');
+  // TT's filler block for a missing day (bars _trou at minute 0 dated that day): masked, the next day anchored.
+  {
+    const c0 = P2[0].bars.at(-1).c, bouche = Array.from({ length: 8 }, () => ({ _trou: true, m: 0, o: c0, h: c0, l: c0, c: c0, lv: [] }));
+    const B3 = aplat([base[0], { date: '2026-11-06', bars: bouche }, { date: '2026-11-09', bars: P2[1].bars }]), t0 = B3.findIndex(b => b._trou);
+    const V = volet(B3, t0 - 5, 'eth'), A = ancre(B3, 'eth');
+    assert.ok(Object.keys(V.cv).every(i => !B3[i]._trou && V.cv[i] === A[i]) && Object.keys(V.cv).some(i => +i > t0 + 8) && V.txt.includes(MSG_VOLET), 'jour comblé par TT');
+  }
+  // Footprint, no dates: CVD sessions split on the minute going back (with the ETH anchor too), late join seen.
+  {
+    const sans = Bx => Bx.map(b => { const c = Object.assign({}, b); delete c._date; return c; });
+    for (const anc of ['eth', 'rth']) egal(volet(sans(B), a1300, anc), ancre(B, anc), 'footprint, ancrage ' + anc);
+    const Bl = avecJour(b => b.filter(x => x.m >= 561)), l1 = Bl.findIndex(b => b._date === JR[1]), V = volet(sans(Bl), l1, 'eth');
+    assert.ok(Object.keys(V.cv).length === 0 && V.txt.includes(MSG_VOLET), 'footprint : séance prise à 03:21');
+  }
+  // A wick ends where the next chart bar starts, even when that bar is masked: 09:28 keeps its wick while 09:29 has no
+  // levels and 09:30 opens the RTH CVD (one +1 print a minute from 09:27 to 09:29).
+  {
+    ({ prix, cvd } = charger()); surch = {};
+    const Bw = Array.from({ length: 941 }, (_, m) => ({ _date: '2026-11-05', m, o: 100, h: 101, l: 99, c: 100, lv: m === 929 ? [] : [[100, 0, 1]] }));
+    const T = [927, 928, 929].map(m => (m * 60 + 10) * 100), M = meches(Bw, ruban(T, [1, 1, 1], [1, 1, 1]), {}, 900);
+    assert.deepEqual(Object.keys(M), ['927', '928'], 'mèche de la barre avant une barre masquée');
+  }
+  // The last session masked: no divergence in formation nor pre-shot on the end of the session before. A UE forming
+  // on its last bar (higher high, lower CVD than the pivot at 10), then a session joined at 10:00 ET.
+  {
+    const synth = synthetique([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 109, 108, 107, 106, 105, 104, 105, 106, 107, 108, 109, 110, 111],
+      [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 0, 50, 60, 70, 80, 90, 150, 200, 250, 300, 350, 400, 500]);
+    const forme = S => S.filter(x => x.etat === 'formation').map(x => x.t + x.n);
+    assert.deepEqual(forme(signaux(prix, { tol: 0 }, synth, 0)), ['UE1'], 'UE en formation sur la dernière barre');
+    const tard = Array.from({ length: 12 }, (_, k) => ({ _date: '2026-01-05', m: 960 + k, o: 105, h: 106, l: 104, c: 105, lv: [[105, 1, 1]] }));
+    assert.deepEqual(forme(signaux(prix, { tol: 0 }, synth.concat(tard), 0)), [], 'séance suivante masquée : plus de formation');
+    const pt = synthetique([100, 100, 101, 101, 102, 103, 104, 105, 106, 108, 110, 108, 106, 104, 103, 102, 101, 102, 103, 104, 105, 106, 107, 108, 109, 109.5],
+      [0, 50, 100, 150, 200, 300, 450, 600, 800, 900, 1000, 900, 700, 500, 350, 200, 150, 150, 160, 170, 180, 200, 230, 260, 280, 300]);
+    assert.deepEqual(signaux(prix, { conf: 'pivot', tol: 0 }, pt.concat(tard), 0).preTir, [], 'séance suivante masquée : plus de pré-tir');
+  }
+  // Budget: one CVD session of 60 000 bars (fine tick chart), the screen at its end. The lead is read over several
+  // frames, nothing drawn meanwhile, never three frames in a row over 8 ms per study, then anchored levels.
+  {
+    const src = db.sessions.flatMap(s => s.bars), NB = 60000;
+    const T = Array.from({ length: NB }, (_, k) => Object.assign({}, src[k % src.length], { _date: '2026-11-05', m: k * 929 / NB }));
+    ({ prix, cvd } = charger()); surch = { anc: 'eth' };
+    const rp = Object.assign(defaut(prix), { anc: 'eth' }), rl = Object.assign(defaut(cvd), { style: 'ligne' });
+    let images = 0, susp = false, pire = 0, t;
+    const lents = [0, 0];
+    for (demandes = 1; demandes && images < 50; images++) {
+      demandes = 0; const rec = [], G = Object.assign(g(T, NB - 200, NB - 1, rec), { tf: '100t' });
+      [[prix, rp], [cvd, rl]].forEach(([d, r], k) => { const t0 = performance.now(), n0 = demandes, r0 = rec.length; d.dessine(G, r); const ms = performance.now() - t0;
+        pire = Math.max(pire, ms); lents[k] = ms > 8 ? lents[k] + 1 : 0; susp ||= lents[k] >= 3;
+        if (demandes > n0) assert.equal(rec.length, r0, 'rien tant que l\'amorce se lit'); });
+      t = rec.find(x => x.k === 'trait' && x.o.couleur === rl.ccvd);
+    }
+    const A = ancre(T, 'eth'), pts = t.p.filter(p => isFinite(p[0]));
+    assert.ok(images > 1 && !susp && pts.length > 100 && pts.every(p => p[1] === A[p[0]]), 'amorce de 60 000 barres étalée, ' + images + ' images, pire ' + pire.toFixed(2) + ' ms');
+    console.log('  amorce de 60 000 barres :', images, 'images, pire', pire.toFixed(2), 'ms par étude');
   }
 }
 

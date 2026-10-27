@@ -13,11 +13,20 @@
 // redepasse B avant, pointille attenue « x »). Une zone de pre-tir se peint au
 // niveau du dernier pivot retenu quand le prix y revient et que le CVD diverge
 // deja. Les nouveaux signaux de la seance passent par HFQNotify.
+//
+// Rien n'est tire de donnees manquantes : le CVD se cumule depuis l'ancrage,
+// meme quand l'ecran commence apres lui, et une seance prise apres son
+// ancrage, trouee ou dont une barre n'a pas de niveaux (delta inconnu) n'a
+// ni CVD ni divergence a partir de la, legende a l'appui.
 (function(){
 
 // ponytail: 09:30 ET en minutes de seance sur un graphe ETH ouvert a 18:00 (ES, NQ).
 // A exposer en reglage si un produit avec un autre RTH arrive.
 var RTH_M = 930;
+// Trou de donnees, en minutes : plus de 10 minutes sans barre au-dela d'une
+// barre, le seuil des marques « sans donnee » de TT (HFQLiveSeed.trouEntre).
+// ponytail: graphes en ticks, volume ou range, sans duree de barre : une heure, qu'une barre lente d'Asie peut approcher.
+function tolere(g){ return typeof g.tf === 'number' ? Math.max(1, g.tf) + 10 : 60; }
 
 // Anglais : noms, descriptions, reglages, options, textes du canevas et des
 // notifications. Les descriptions portent aussi le suffixe que le panneau ajoute.
@@ -46,7 +55,9 @@ var EN = {
   'Bougie CVD haussière':'CVD up candle', 'Bougie CVD baissière':'CVD down candle', 'Ligne CVD':'CVD line',
   'pré-tir':'pre-shot', 'Divergence CVD':'CVD divergence', 'en formation à':'forming at', 'confirmée à':'confirmed at',
   'Divergences CVD : ce graphe ne sert aucun delta par barre':'CVD Divergences: this chart serves no per-bar delta',
-  'CVD : aucun delta par barre sur ce graphe':'CVD: no per-bar delta on this chart'
+  'CVD : aucun delta par barre sur ce graphe':'CVD: no per-bar delta on this chart',
+  'Divergences CVD : masquées sur une séance incomplète':'CVD Divergences: hidden on an incomplete session',
+  'CVD : masqué sur une séance incomplète':'CVD: hidden on an incomplete session'
 };
 EN[DESC_PRIX] = 'UE/UA/DE/DA between price pivots that have a CVD pivot nearby, pre-shot zones, alerts. Holds the detection settings of the CVD pane.';
 EN[DESC_CVD] = 'Cumulative delta candles, wicks read from the session tape, bare axes, same divergences as the price study (detection settings read there).';
@@ -279,34 +290,107 @@ function vue(g){
   return [deb, Math.min(fin, borne(g, deb, fin, g.cadre.droite))];
 }
 
+function cleBarre(b){ return b ? (b._date || '') + ':' + b.m : ''; }
+
+// Meme seance de CVD : meme date (footprint, sans date : minutes qui ne
+// repartent pas en arriere) et, avec l'ancrage RTH, meme cote de 09:30.
+function meme(p, b, rth){
+  return (b._date != null ? String(b._date) === String(p._date) : +b.m >= +p.m) && (!rth || (+p.m >= RTH_M) === (+b.m >= RTH_M));
+}
+
+// Premiere barre de la seance de CVD de la barre p (index k) : dates
+// croissantes et, dans une date, minutes croissantes, d'ou une dichotomie ;
+// sans date (footprint), on remonte barre a barre.
+function debut(g, k, p, rth){
+  var b = p, q, lo = 0, hi = k;
+  if(p._date != null){
+    while(lo < hi){ var mi = (lo + hi) >> 1; q = g.barre(mi); if(q && meme(q, p, rth)) hi = mi; else lo = mi + 1; }
+    return lo;
+  }
+  for(; k > 0 && (q = g.barre(k - 1)) && meme(q, b, rth); k--) b = q;
+  return k;
+}
+
+// Une barre de plus dans la seance de CVD E : delta, cumul depuis l'ancrage et
+// validite. Le cumul n'est juste que si la seance part de son ancrage, sans
+// barre de comblement, sans barre sans niveaux (delta inconnu, pas nul) ni
+// trou de plus de `ecart` minutes ; invalide, elle le reste jusqu'a la suivante.
+function etend(E, b, L, neuve, rth, ecart){
+  var m = +b.m, n = L ? L.n : 0;
+  if(neuve){ E.cum = 0; E.ok = m - (rth && m >= RTH_M ? RTH_M : 0) <= ecart; }
+  else if(m - E.m > ecart) E.ok = false;
+  if(b._trou || !n) E.ok = false;
+  E.d = n ? (L.deltaTotal() || 0) : 0;
+  E.cum += E.d; E.m = m;
+}
+
+// Seance de CVD de la barre i0 - 1 lue depuis son ancrage : calc ne lit qu'a
+// partir de i0 (300 barres avant l'ecran) et y reprend cumul et validite,
+// sans quoi le volet tracerait le CVD depuis i0. Cumul par barre garde pour
+// le defilement, prolonge quand i0 avance ; tout se relit si la premiere ou
+// la derniere barre lue n'est plus a son index (barres inserees plus tot).
+// Passee l'echeance `fin`, la lecture s'arrete (null) et reprend a l'image
+// suivante : une seance de 30 000 barres coute 17 ms d'un bloc.
+var AMORCE = {sig:'', s0:0, k:0, C:[], bad:Infinity, cle0:'', der:''};
+function amorce(g, rth, ecart, i0, fin){
+  var A = AMORCE, p = i0 > 0 ? g.barre(i0 - 1) : null, E = {cum:0, ok:true, m:NaN, d:0}, k, b, q;
+  if(!p) return E;
+  var sig = [g.sym, g.tf, g.seance, rth, ecart].join('|'), aNiv = (typeof g.niveaux === 'function');
+  if(A.sig !== sig || i0 - 1 < A.s0 || cleBarre(g.barre(A.s0)) !== A.cle0 || (A.k > A.s0 && cleBarre(g.barre(A.k - 1)) !== A.der)){
+    k = debut(g, i0 - 1, p, rth);
+    A.sig = sig; A.s0 = A.k = k; A.C = []; A.bad = Infinity; A.cle0 = cleBarre(g.barre(k));
+  }
+  var S = {cum:0, ok:true, m:NaN, d:0};
+  q = A.k > A.s0 ? g.barre(A.k - 1) : null;
+  if(q){ S.cum = A.C[A.k - 1 - A.s0]; S.ok = A.k - 1 < A.bad; S.m = +q.m; }
+  for(k = A.k; k < i0; k++){
+    if(!(k & 1023) && k > A.k && maintenant() > fin){ A.k = k; A.der = cleBarre(q); return null; }
+    if(!(b = g.barre(k))){ A.C[k - A.s0] = S.cum; continue; }
+    var neuve = !q || !meme(q, b, rth);
+    if(neuve && k > A.s0){ A.s0 = k; A.C = []; A.bad = Infinity; A.cle0 = cleBarre(b); }
+    etend(S, b, aNiv ? g.niveaux(k) : null, neuve, rth, ecart);
+    A.C[k - A.s0] = S.cum;
+    if(!S.ok && A.bad > k) A.bad = k;
+    q = b;
+  }
+  if(i0 > A.k){ A.k = i0; A.der = cleBarre(p); }
+  E.cum = A.C[i0 - 1 - A.s0]; E.ok = i0 - 1 < A.bad; E.m = +p.m;
+  return E;
+}
+
 function calc(g, r){
   var V = vue(g), i0 = Math.max(0, V[0] - 300), i1 = V[1];
   if(!(i1 > i0)) return null;
   var idx = [], hi = [], lo = [], cv = [], dl = [], sk = [], mn = [];
-  var cum = 0, cle = null, aDelta = false;
+  var aDelta = false, manque = false, seg = 0;
   var aNiv = (typeof g.niveaux === 'function');
-  var rth = (r.anc === 'rth' && g.seance === 'eth');
+  var rth = (r.anc === 'rth' && g.seance === 'eth'), ecart = tolere(g);
+  var E = amorce(g, rth, ecart, i0, maintenant() + AMORCE_MS), p = i0 > 0 ? g.barre(i0 - 1) : null;
+  if(!E){ redessiner(); return {attente:true}; }
   for(var i = i0; i <= i1; i++){
     var b = g.barre(i);
     if(!b) continue;
-    var c = String(b._date || '') + ((rth && +b.m >= RTH_M) ? 'R' : '');
-    if(c !== cle){ cum = 0; cle = c; }
-    var d = 0;
-    if(aNiv){
-      var L = g.niveaux(i);
-      if(L && L.n){ d = L.deltaTotal() || 0; if(d !== 0) aDelta = true; }
-    }
-    cum += d;
+    var neuve = !p || !meme(p, b, rth);
+    if(neuve) seg++;
+    etend(E, b, aNiv ? g.niveaux(i) : null, neuve, rth, ecart);
+    p = b;
+    if(E.d !== 0) aDelta = true;
+    // Seance invalide a partir d'ici : ni CVD ni divergence, la legende le dit.
+    if(!E.ok){ if(i >= V[0]) manque = true; continue; }
     idx.push(i);
     hi.push(r.cmp === 'close' ? b.c : b.h);
     lo.push(r.cmp === 'close' ? b.c : b.l);
-    cv.push(cum);
-    dl.push(d);
-    sk.push(c);
+    cv.push(E.cum);
+    dl.push(E.d);
+    // Date de la seance (meches de la seance affichee), puis numero de seance de CVD.
+    sk.push(String(b._date || '') + '#' + seg);
     mn.push(+b.m);
   }
   var n = idx.length;
-  if(n < 10) return null;
+  if(n < 10) return {vide:true, aDelta:aDelta, manque:manque};
+  // Seance de la derniere barre masquee : pas de divergence en formation ni de
+  // pre-tir sur la fin d'une seance d'avant.
+  var vif = idx[n - 1] === i1;
 
   var S = {idx:idx, hi:hi, lo:lo, cv:cv, dl:dl, sk:sk, n:n, tick:(g.tick || 0), seuil:r.minT * (g.tick || 0)};
 
@@ -328,7 +412,7 @@ function calc(g, r){
     for(a = 1; a < Lw.length; a++){ s = meilleur(S, r, Lw, a, Lw[a].p, Lw[a].q, -1, niv, false); if(s) sig.push(s); }
 
     // En formation : l'extreme encore trop recent pour etre un pivot, prix et CVD d'accord.
-    if(r.conf === 'cloture'){
+    if(r.conf === 'cloture' && vif){
       if(H.length){
         d1 = H[H.length-1].p;
         cp = candidat(hi, 1, d1, n); cc = candidat(cv, 1, d1, n);
@@ -348,9 +432,9 @@ function calc(g, r){
     if(vu[k] != null) uniq[vu[k]] = sig[a]; else { vu[k] = uniq.length; uniq.push(sig[a]); }
   }
   var pre = [], z;
-  if((z = preTir(S, r, H0,  1, uniq))) pre.push(z);
-  if((z = preTir(S, r, L0, -1, uniq))) pre.push(z);
-  return {idx:idx, cv:cv, dl:dl, sk:sk, mn:mn, sig:uniq, pre:pre, aDelta:aDelta};
+  if(vif && (z = preTir(S, r, H0,  1, uniq))) pre.push(z);
+  if(vif && (z = preTir(S, r, L0, -1, uniq))) pre.push(z);
+  return {idx:idx, cv:cv, dl:dl, sk:sk, mn:mn, sig:uniq, pre:pre, aDelta:aDelta, manque:manque};
 }
 
 // Meches du volet : extremes du delta cumule pendant la barre, que seule la
@@ -364,19 +448,26 @@ function calc(g, r){
 // `t0`, debut de dessine, calcul partage compris (2 a 4 ms par tick sur une
 // seance entiere), la suite a l'image suivante, demandee par HFQExt.redessiner().
 var MECHES = {cle:'', m:new Map()}, BUDGET_MS = 5;
+// ponytail: part de l'image laissee a amorce(), le calcul des pivots (2 a 4 ms) passant apres elle.
+var AMORCE_MS = 3;
 function maintenant(){ return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now(); }
+function redessiner(){
+  try{ if(typeof setTimeout !== 'undefined' && HFQExt.redessiner) setTimeout(function(){ HFQExt.redessiner(); }, 0); }catch(_){}
+}
 function meches(g, S, d0, t0){
   var P = g.prints, out = {};
   if(!P || !P.n || typeof P.avant !== 'function') return out;
   var cle = [g.sym, g.seance, g.tf].join('|');
   if(cle !== MECHES.cle){ MECHES.cle = cle; MECHES.m = new Map(); }
-  var jourDe = function(k){ return S.sk[k].replace(/R$/, ''); };
+  var jourDe = function(k){ return S.sk[k].split('#')[0]; };
   var avant = function(m){ return P.avant((Math.ceil(m * 6000) - 0.5) / 100); };
-  var der = g.barre(g.n - 1), jour = String((der && der._date) || ''), n = S.idx.length;
-  var suiv = g.barre(S.idx[n - 1] + 1), reste = false;
+  var der = g.barre(g.n - 1), jour = String((der && der._date) || ''), n = S.idx.length, reste = false;
   for(var k = d0; k < n && !reste; k++){
     if(jourDe(k) !== jour) continue;
-    var fin = (k + 1 < n) ? (jourDe(k + 1) === jour ? S.mn[k + 1] : null)
+    // Fin de la barre : debut de la barre suivante du graphe, lue sur le graphe
+    // si elle n'est pas la suivante du calcul (fin du calcul, barres masquees).
+    var nx = k + 1 < n && S.idx[k + 1] === S.idx[k] + 1, suiv = nx ? null : g.barre(S.idx[k] + 1);
+    var fin = nx ? (jourDe(k + 1) === jour ? S.mn[k + 1] : null)
             : (suiv && String(suiv._date || '') === jour ? +suiv.m : null);
     var a = avant(S.mn[k]), b = (fin == null) ? P.n - 1 : avant(fin);
     var e = MECHES.m.get(S.idx[k]);
@@ -389,9 +480,7 @@ function meches(g, S, d0, t0){
     e.b = Math.min(j, b);
     if(!reste && e.b > e.a && e.run === S.dl[k]) out[k] = e;
   }
-  if(reste){
-    try{ if(typeof setTimeout !== 'undefined' && HFQExt.redessiner) setTimeout(function(){ HFQExt.redessiner(); }, 0); }catch(_){}
-  }
+  if(reste) redessiner();
   return out;
 }
 
@@ -407,6 +496,8 @@ function cleDe(g, r){
 function calcCache(g, r){
   var k = cleDe(g, r);
   if(k !== CACHE.cle){ CACHE.cle = k; CACHE.S = calc(g, r); }
+  // Lecture de l'amorce inachevee : rien a garder, l'image suivante la reprend.
+  if(CACHE.S && CACHE.S.attente){ CACHE.cle = ''; return null; }
   return CACHE.S;
 }
 
@@ -576,6 +667,8 @@ HFQExt.etude({
         {taille:11, align:'left', couleur:'#e0567f'});
       return;
     }
+    if(S.manque) g.texte(g.cadre.gauche + 8, g.cadre.haut + 14, tr('Divergences CVD : masquées sur une séance incomplète'), {taille:11, align:'left', couleur:'#e0567f'});
+    if(S.vide) return;
     dessinerPreTir(g, S, r, r);
     dessinerSignaux(g, S, r, r, function(s){
       return [[g.x(S.idx[s.a]), g.y(s.pa)], [g.x(S.idx[s.b]), g.y(s.pb)]];
@@ -615,6 +708,8 @@ HFQExt.etude({
         {taille:11, align:'left', couleur:'#e0567f'});
       return;
     }
+    if(S.manque) g.texte(g.cadre.gauche + 8, g.cadre.haut + 14, tr('CVD : masqué sur une séance incomplète'), {taille:11, align:'left', couleur:'#e0567f'});
+    if(S.vide) return;
     var e = g.echelle || 1, c = g.ctx, i, F = g.cadre;
 
     if(r.ordo && c){
@@ -653,7 +748,7 @@ HFQExt.etude({
     while(d0 < S.idx.length && S.idx[d0] < v0) d0++;
 
     if(r.style === 'bougies' && c){
-      var pas = (S.idx.length > 1) ? Math.abs(g.x(S.idx[1]) - g.x(S.idx[0])) : 4 * e;
+      var pas = Math.abs(g.x(S.idx[0] + 1) - g.x(S.idx[0])) || 4 * e;
       var w = Math.max(1, pas * 0.62), lw = Math.max(1, e);
       // Un seul remplissage par couleur : un fillRect par bougie et par meche
       // depassait le budget de TT des quelques milliers de barres visibles.
