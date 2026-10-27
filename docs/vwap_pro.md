@@ -16,6 +16,8 @@ Le VWAP de Turning Trade est journalier et s'arrête à deux écarts-types. VWAP
 
 **Ancrages.** *Journalier* : la séance du graphe, donc sur un graphe ETH la journée Globex de 18:00 à 17:00 New York, et sur un graphe RTH la séance régulière. *Séance US, Asie, Europe* : les barres de la journée dont l'heure tombe dans la fenêtre de la séance, rien en dehors. *Hebdomadaire* : les séances d'une même semaine ISO, du lundi au dimanche. *Mensuel* : les séances d'un même mois civil.
 
+**Semaine ou mois incomplet.** Un graphe en ticks ne remonte qu'à deux semaines environ. Quand sa première barre tombe après le début de la semaine ou du mois, VWAP Pro ajoute les barres d'une minute que Turning Trade sert aux bougies, qui portent le volume par prix : le VWAP et les bandes sont alors ceux d'un graphe en minutes qui aurait toute la période. Si ces barres ne remontent pas non plus au premier jour ouvré de la période, ou ont un trou de plus de quatre jours, la période n'est pas tracée : pas de valeur calculée sur des données manquantes. Sur un graphe en minutes, tiré du même fichier, une première période incomplète est masquée directement.
+
 **Heures de séance.** Par défaut, l'étude lit les « sessions monde » de Turning Trade, celles qui colorent le fond du graphe et se règlent dans l'appli : Tokyo à 18:00 New York, Londres à 08:00 heure de Londres, New York à 09:30, clôture à 16:00. Une séance court jusqu'au début de la suivante. Chaque instance peut forcer son début et sa fin, exprimés dans le fuseau de son choix ; la conversion vers l'heure de New York tient compte de l'heure d'été de chaque côté.
 
 ## À quoi ça sert
@@ -57,6 +59,7 @@ Les mêmes réglages existent sur les six instances ; seuls l'ancrage et le thè
 - Le panneau de TT n'a pas de vrai titre de section : chaque sous-section commence par sa case à cocher, suivie d'un filet.
 - Les séances Asie et Europe n'ont de barres que sur un graphe ETH ; sur un graphe RTH elles ne dessinent rien.
 - Le footprint ne date pas ses barres : l'hebdomadaire et le mensuel y retombent sur la séance affichée, et les heures de séance sont lues à la date du jour.
+- Turning Trade ne sert aux bougies que les vingt dernières séances : vers la fin d'un mois de plus de vingt séances, le mensuel disparaît du graphe en ticks comme du graphe en minutes, faute de son début. Un jour manquant isolé ne se distingue pas d'un férié et n'est pas détecté. Un premier jour ouvré férié (1er janvier) fait passer la période pour incomplète. Sur un graphe en ticks, la période complétée apparaît une fois le fichier minute lu, une fraction de seconde après l'ouverture.
 - Une fenêtre de séance qui enjambe l'ouverture du graphe (par exemple 17:00 → 18:30 New York sur un graphe ETH) est coupée à l'ouverture.
 - Les offsets d'heure d'été sont calculés à midi de la date de la séance : le jour exact d'un changement d'heure, la fenêtre peut être décalée d'une heure sur les barres du soir.
 - **Premier affichage** d'un long historique, ou après un changement de réglage : le calcul s'étale sur quelques images pour ne pas figer le graphe, les traits apparaissent une fraction de seconde après le reste.
@@ -79,6 +82,8 @@ Turning Trade's VWAP is daily and stops at two standard deviations. VWAP Pro kee
 **Standard deviation.** σ = √(Σ price² × volume / Σ volume − VWAP²), weighted by the same volume. A band with multiplier k is drawn at VWAP ± k σ. Sums restart from zero at every new anchor.
 
 **Anchors.** *Daily*: the chart's session, so on an ETH chart the Globex day from 18:00 to 17:00 New York, and on an RTH chart the regular session. *US, Asian, European session*: the bars of the day whose time falls inside the session window, nothing outside. *Weekly*: the sessions of one ISO week, Monday to Sunday. *Monthly*: the sessions of one calendar month.
+
+**Incomplete week or month.** A tick chart only goes back two weeks or so. When its first bar falls after the start of the week or month, VWAP Pro adds the one-minute bars Turning Trade serves the candles, which carry volume per price: the VWAP and bands are then those of a minute chart holding the whole period. If those bars do not reach the period's first business day either, or have a hole of more than four days, the period is not drawn: no value computed on missing data. On a minute chart, cut from the same file, an incomplete first period is masked straight away.
 
 **Session hours.** By default the study reads Turning Trade's "world sessions", the ones that tint the chart background and are edited in the app: Tokyo at 18:00 New York, London at 08:00 London time, New York at 09:30, close at 16:00. A session runs until the next one starts. Each instance can force its start and end, expressed in the time zone of your choice; the conversion to New York time accounts for daylight saving on both sides.
 
@@ -121,6 +126,7 @@ The same settings exist on all six instances; only the default anchor and theme 
 - TT's panel has no real section title: each sub-section starts with its checkbox, followed by a rule.
 - Asian and European sessions only have bars on an ETH chart; on an RTH chart they draw nothing.
 - The footprint does not date its bars: weekly and monthly fall back to the displayed session there, and session hours are read at today's date.
+- Turning Trade only serves the candles the last twenty sessions: towards the end of a month of more than twenty sessions, the monthly VWAP disappears from the tick chart as from the minute chart, its start being gone. A lone missing day cannot be told from a holiday and is not detected. A first business day that is a holiday (1 January) makes the period look incomplete. On a tick chart, the completed period shows once the minute file is read, a split second after opening.
 - A session window that straddles the chart's open (for instance 17:00 → 18:30 New York on an ETH chart) is cut at the open.
 - Daylight-saving offsets are computed at noon of the session date: on the exact day of a clock change, the window may be off by one hour on the evening bars.
 - **First display** of a long history, or after a settings change: the computation spreads over a few frames so the chart does not freeze, the lines show a split second after the rest.

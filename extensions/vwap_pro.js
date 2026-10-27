@@ -11,6 +11,11 @@
 // instance peut les forcer, dans le fuseau de son choix. Le VWAP se calcule
 // sur le volume par prix du footprint quand la barre en a, sinon sur le
 // volume de la barre a son prix typique.
+//
+// Une semaine ou un mois que le graphe ne prend pas a son debut (un graphe en
+// ticks remonte a deux semaines environ) est complete par les barres d'une
+// minute que TT sert aux bougies ; si elles n'y remontent pas non plus, la
+// periode est masquee plutot que tracee depuis la premiere barre chargee.
 (function(){
 
 var ET = 'America/New_York', NSD = 6;
@@ -38,6 +43,11 @@ var POINTILLE = {plein:null, tirets:[6,4], points:[2,3], fins:[1,3], mixte:[8,3,
 var BUDGET_MS = 4;
 // ponytail: au zoom arriere, un point tous les PX_POINT pixels ; VWAP et bandes sont assez lisses pour que l'oeil n'y voie rien.
 var PX_POINT = 2;
+// ponytail: une semaine ou un mois commence dans les donnees si sa premiere barre tombe dans la premiere heure de son premier jour ouvre.
+var DEBUT_MAX = 60;
+// ponytail: plus de quatre jours entre deux seances (un week-end et un ferie), c'est un trou ; un seul jour manquant passe pour un ferie.
+var TROU_JOURS = 4;
+var ZERO = {V:0, PV:0, PV2:0};
 var NOMS ={jour:'DVWAP', sem:'wVWAP', mois:'mVWAP', us:'VWAP RTH', asie:'VWAP Asie', eu:'VWAP EU'};
 
 var ANCRES = [['jour','Journalier (séance du graphe)'],['us','Séance US (RTH)'],['asie','Séance Asie'],['eu','Séance Europe'],['sem','Hebdomadaire (semaine ISO)'],['mois','Mensuel']];
@@ -153,6 +163,80 @@ function semaine(cle){
   return an + '-' + (num < 10 ? '0' : '') + num;
 }
 
+// Cle de la semaine ISO ou du mois d'une date de seance.
+function periode(anc, date){ return anc === 'sem' ? 's' + semaine(date) : 'm' + date.slice(0, 7); }
+
+// Vrai si la date est le premier jour ouvre de sa semaine (lundi) ou de son mois.
+// ponytail: les feries sont ignores ; une periode ouverte par un ferie passe pour incomplete, donc masquee.
+function premierOuvre(anc, date){
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(date);
+  if(!m) return false;
+  var jour = function(k){ return new Date(Date.UTC(+m[1], +m[2] - 1, k)).getUTCDay(); };
+  if(anc === 'sem') return jour(+m[3]) === 1;
+  for(var k = 1; k < +m[3]; k++) if(jour(k) % 6) return false;
+  return true;
+}
+
+function jours(a, b){ return (Date.parse(b) - Date.parse(a)) / 864e5; }
+
+// Barres d'une minute que TT sert aux bougies (vingt seances glissantes), lues
+// une fois par fichier et partagees par les six instances. Un graphe en ticks
+// ne remonte qu'a deux semaines environ : elles completent la semaine ou le
+// mois de sa premiere barre.
+var MINUTES = {};
+function minutes(g){
+  var f;
+  try{ f = HFQSymGuard.histFile(g.seance === 'rth' ? '_footprint' : '_footprint_eth', g.sym); }catch(_){ return null; }
+  if(!MINUTES[f]){
+    var M = MINUTES[f] = {pret:false, S:[]}, fini = function(){ M.pret = true; redessiner(); };
+    try{
+      fetch(f, {cache:'no-cache'}).then(function(rep){ return rep.json(); })
+        .then(function(j){ if(j && Array.isArray(j.sessions)) M.S = j.sessions; fini(); }, fini);
+    }catch(_){ M.pret = true; }
+  }
+  return MINUTES[f];
+}
+
+// Ajoute a A les sommes d'une barre du fichier minute, comme calcul le fait d'une barre du graphe.
+function sommes(A, b, src){
+  var lv = b.lv || [], w = 0, p, v, k;
+  for(k = 0; k < lv.length; k++){
+    v = (lv[k][1] || 0) + (lv[k][2] || 0); w += v;
+    if(src === 'auto'){ p = lv[k][0]; A.V += v; A.PV += p * v; A.PV2 += p * p * v; }
+  }
+  if(src === 'auto') return;
+  p = src === 'close' ? b.c : (b.h + b.l + b.c) / 3;
+  A.V += w; A.PV += p * w; A.PV2 += p * p * w;
+}
+
+// Semaine ou mois de la premiere barre quand le graphe ne le prend pas a son
+// debut : {cle, ok, V, PV, PV2}, les sommes des barres d'une minute qui la
+// precedent. ok faux, et la periode masquee, si les donnees ne remontent pas a
+// son debut ou ont un trou, et tant que le fichier n'est pas lu. Un graphe en
+// minutes est tire de ce fichier : rien a y ajouter, la periode est masquee.
+function amorce(C, g, r, b0, sig){
+  if((r.anc !== 'sem' && r.anc !== 'mois') || !b0 || !b0._date) return null;
+  var date0 = String(b0._date).slice(0, 10);
+  if(premierOuvre(r.anc, date0) && +b0.m < DEBUT_MAX) return null;
+  var M = typeof g.tf === 'number' ? null : minutes(g), k = sig + '|' + (M ? M.pret : '-');
+  if(C.amo && C.amo.k === k) return C.amo.A;
+  var A = {cle:periode(r.anc, date0), ok:false, V:0, PV:0, PV2:0};
+  var S = M && M.pret ? M.S : [], vu = false, trou = false, prec = null;
+  for(var i = 0; i < S.length; i++){
+    var d = String(S[i].date || '').slice(0, 10), B = S[i].bars || [];
+    if(!B.length || d > date0) continue;
+    // Une seance d'avant la periode : son debut est dans le fichier.
+    if(periode(r.anc, d) !== A.cle){ A.ok = true; prec = d; continue; }
+    if(prec && jours(prec, d) > TROU_JOURS) trou = true;
+    if(!vu){ vu = true; A.ok = A.ok || (premierOuvre(r.anc, d) && +B[0].m < DEBUT_MAX); }
+    for(var j = 0; j < B.length; j++) if(d < date0 || +B[j].m + 1 <= +b0.m) sommes(A, B[j], r.src);
+    prec = d;
+  }
+  A.ok = A.ok && !trou && prec !== null && jours(prec, date0) <= TROU_JOURS;
+  C.amo = {k:k, A:A};
+  return A;
+}
+
 function aujourdhui(){ return new Date().toISOString().slice(0, 10); }
 // Cle d'une barre, pour reconnaitre la derniere lue a son index.
 function cleBarre(b){ return b ? (b._date || '') + ':' + b.m : ''; }
@@ -180,8 +264,8 @@ function agrandir(C, n){
 function calcul(C, g, r, fin){
   var n = g.n | 0, b0 = n ? g.barre(0) : null;
   var sig = [g.sym, g.tf, g.seance, r.anc, r.deb, r.fin, r.tz, r.src].join('|');
-  var id0 = cleBarre(b0);
-  var depuis = (C.sig === sig && C.id0 === id0 && n >= C.n && C.n > 0 && cleBarre(g.barre(C.n - 1)) === C.der) ? C.n - 1 : 0;
+  var id0 = cleBarre(b0), A = amorce(C, g, r, b0, sig + '|' + id0);
+  var depuis = (C.sig === sig && C.id0 === id0 && C.A === A && n >= C.n && C.n > 0 && cleBarre(g.barre(C.n - 1)) === C.der) ? C.n - 1 : 0;
   if(!depuis) C.fen = {};
   agrandir(C, n);
   var ouv = OUVERTURE[g.seance] != null ? OUVERTURE[g.seance] : 1080;
@@ -195,8 +279,7 @@ function calcul(C, g, r, fin){
     C.sessAt[i] = sess;
     var date = b._date ? String(b._date).slice(0, 10) : '', cle;
     if(r.anc === 'jour') cle = 'j' + sess;
-    else if(r.anc === 'sem') cle = date ? 's' + semaine(date) : 'j' + sess;
-    else if(r.anc === 'mois') cle = date ? 'm' + date.slice(0, 7) : 'j' + sess;
+    else if(r.anc === 'sem' || r.anc === 'mois') cle = date ? periode(r.anc, date) : 'j' + sess;
     else {
       var F = C.fen[date] || (C.fen[date] = fenetreM(bornesET(r.anc, date || aujourdhui(), r), ouv));
       var m = +b.m, dans = (m >= F[0] && m < F[1]) || (m + 1440 >= F[0] && m + 1440 < F[1]);
@@ -212,18 +295,18 @@ function calcul(C, g, r, fin){
         v = w; pv = p * w; pv2 = p * p * w;
       }
     }
-    var suite = i > 0 && cle && C.cle[i - 1] === cle;
-    C.V[i] = (suite ? C.V[i - 1] : 0) + v;
-    C.PV[i] = (suite ? C.PV[i - 1] : 0) + pv;
-    C.PV2[i] = (suite ? C.PV2[i - 1] : 0) + pv2;
+    var suite = i > 0 && cle && C.cle[i - 1] === cle, A0 = !suite && A && cle === A.cle ? A : ZERO;
+    C.V[i] = (suite ? C.V[i - 1] : A0.V) + v;
+    C.PV[i] = (suite ? C.PV[i - 1] : A0.PV) + pv;
+    C.PV2[i] = (suite ? C.PV2[i - 1] : A0.PV2) + pv2;
     C.cle[i] = cle;
-    if(cle && C.V[i] > 0){
+    if(cle && C.V[i] > 0 && !(A && !A.ok && cle === A.cle)){
       var vw = C.PV[i] / C.V[i];
       C.vwap[i] = vw; C.sd[i] = Math.sqrt(Math.max(0, C.PV2[i] / C.V[i] - vw * vw));
     } else { C.vwap[i] = NaN; C.sd[i] = NaN; }
     prev = b;
   }
-  C.n = i; C.sig = sig; C.id0 = id0; C.der = cleBarre(g.barre(i - 1));
+  C.n = i; C.sig = sig; C.id0 = id0; C.A = A; C.der = cleBarre(g.barre(i - 1));
   return C;
 }
 
