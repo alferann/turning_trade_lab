@@ -28,7 +28,7 @@ const avec = o => Object.assign({}, defaut, o);
 const rec = [];
 const ctx = { save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, fill() { rec.push({ k: 'fill', col: this.fillStyle, op: this.globalAlpha }); } };
 const g = (B = bars, seance = 'eth', premiere = B.length - 300) => ({ n: B.length, premiere, derniere: B.length - 1, tick, seance, sym: 'ES', tf: 1, echelle: 1, ctx,
-  cadre: { gauche: 0, droite: 1000, haut: 0, bas: 500 }, barre: i => B[i] || null, niveaux: i => J(B[i] && B[i].lv), x: i => 2 * i, y: v => v,
+  cadre: { gauche: 0, droite: 1e9, haut: 0, bas: 500 }, barre: i => B[i] || null, niveaux: i => J(B[i] && B[i].lv), x: i => 2 * i, y: v => v,
   trait(p, o) { rec.push({ k: 'trait', p, o }); }, etiquette(p, o) { rec.push({ k: 'etiq', p, o }); }, ligne() {}, zone() {}, texte() {} });
 
 // The study draws nothing until its cold compute has caught up with the chart: compute it all first.
@@ -188,6 +188,19 @@ const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a 
   assert.equal(reduit.at(-1)[0], (N - 1) / 4, 'dernière barre gardée');
   dessine(Object.assign(g(bars, 'eth', iCur - 200), { x: i => i / 4 }), avec({ hist: 'cour' }));
   assert.equal(rec.filter(x => x.k === 'trait').pop().p.find(Boolean)[0], iCur / 4, 'première barre de la séance gardée');
+}
+
+// 10b. Footprint: TT passes the whole history as premiere..derniere. Only the bars inside the frame are drawn,
+// plus one on each side, else six levels over every bar got the study suspended.
+{
+  const six = avec({ on4: true, on5: true, on6: true, sd4: 2.5, sd5: 3.9, sd6: 0.5, f4: 0.1, f5: 0.1, f6: 0.1 });
+  const G = Object.assign(g(bars, 'eth', 0), { x: i => (i - N + 40) * 40 + 20, cadre: { gauche: 0, droite: 1000, haut: 0, bas: 500 } });
+  dessine(G, six);
+  const p = rec.filter(x => x.k === 'trait').pop().p.filter(Boolean);
+  assert.deepEqual([p.length, p[0][0], p.at(-1)[0]], [27, -20, 1020], 'footprint : barres du cadre seules, une de chaque côté');
+  const t = performance.now(); for (let k = 0; k < 50; k++) A.dessine(G, six);
+  const ms = (performance.now() - t) / 50;
+  assert.ok(ms < 1, 'footprint : image chaude ' + ms.toFixed(3) + ' ms');
 }
 
 // 11. Budget: the cold compute spans several frames, never three in a row over 8 ms (TT's suspension rule, so a
