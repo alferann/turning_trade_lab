@@ -155,6 +155,74 @@ const synth = (dates, m0 = 0) => dates.flatMap((date, s) => [0, 1, 2].map(k => {
   assert.equal(cour(g(B.filter(b => b._date >= '2026-10-12')), avec({ periode: 'sem' })).partiel, null, 'semaine chargée depuis son lundi');
   egal(cour(g(B), defaut), reference(parDate(B, d => d === '2026-10-14')), 'séance du 14');
   assert.match(complet(g(B, { seance: 'rth' }), avec({ periode: 'asie' })).raison, /fenêtre de séance/, 'pas d\'Asie sur un graphe RTH');
+  const tard = B.filter(b => b._date >= '2026-10-12').map(b => b._date === '2026-10-12' ? Object.assign({}, b, { m: b.m + 100 }) : b);
+  assert.equal(cour(g(tard), avec({ periode: 'sem' })).partiel, '2026-10-12', 'lundi pris plus d\'une heure après son ouverture : partiel');
+}
+
+// 6b. A tick chart that does not start its week or month is completed from the candles' minute file,
+// read once by fetch; masked until it is read, if the file does not reach the first business day, or
+// if it has a gap of more than four days. A minute chart comes from that file: masked, nothing read.
+{
+  const B = synth(jours('2026-08-31', '2026-10-14')), fichier = S => ({ sessions: S.map(date => ({ date, bars: B.filter(b => b._date === date).map(({ _date, ...b }) => b) })) });
+  const FICHIERS = {}, appels = [], attente = [];
+  const D = charger({ HFQSymGuard: { histFile: (t, s) => t + '_' + s + '.json' },
+    fetch: f => { appels.push(f); return new Promise(ok => attente.push(() => ok({ json: () => FICHIERS[f] }))); } })[0];
+  const servir = async () => { attente.splice(0).forEach(x => x()); await new Promise(r => setImmediate(r)); };
+  const tous = jours('2026-08-31', '2026-10-14'), M = avec({ periode: 'mois' }), W = avec({ periode: 'sem' });
+  const plein = cour(g(B), M, D);
+  const ticks = (Bc, sym, S = tous) => { FICHIERS['_footprint_eth_' + sym + '.json'] = fichier(S); return g(Bc, { sym, tf: '1000t' }); };
+
+  // Chart from Tuesday 6/10: October and week 41 completed once the file is read, equal to the full chart.
+  const G = ticks(B.filter(b => b._date >= '2026-10-06'), 'TK1');
+  assert.equal(cour(G, M, D).partiel, '2026-10-06', 'masqué tant que le fichier n\'est pas lu');
+  await servir();
+  const C = cour(G, M, D);
+  assert.equal(C.partiel, null, 'octobre complété');
+  egal(C, reference(parDate(B, d => d >= '2026-10')), 'octobre complété');
+  assert.deepEqual([plat(C), C.poc, C.vah, C.val], [plat(plein), plein.poc, plein.vah, plein.val], 'octobre complété = graphe entier');
+  assert.equal(C.deb, 0, 'dessiné depuis la première barre du graphe');
+  const G2 = ticks(B.filter(b => b._date >= '2026-10-13'), 'TK1');
+  egal(cour(G2, W, D), reference(parDate(B, d => d >= '2026-10-12')), 'semaine 42 complétée par le lundi du fichier');
+  assert.equal(appels.filter(f => f === '_footprint_eth_TK1.json').length, 1, 'fichier lu une fois');
+
+  // A previous week opened by the chart's first session is completed too.
+  const G6 = ticks(B.filter(b => b._date >= '2026-10-06'), 'TK6');
+  complet(G6, avec({ periode: 'sem', hist: 1 }), D); await servir();
+  const P6 = complet(G6, avec({ periode: 'sem', hist: 1 }), D).prec;
+  assert.deepEqual(P6.map(R => R.cle), ['41'], 'semaine 41 précédente complétée');
+  egal(P6[0], reference(parDate(B, d => d >= '2026-10-05' && d <= '2026-10-09')), 'semaine 41 entière');
+
+  // Real full sessions redated from Monday 2/11, the chart holding the last two: the frame that reads
+  // five sessions of the file stays a single slow frame, far from three in a row.
+  const PL = db.sessions.filter(s => s.bars[0].m === 0 && s.bars[s.bars.length - 1].m >= 1370);
+  const RS = ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-09', '2026-11-10'].map((date, k) => ({ date, bars: PL[k % PL.length].bars }));
+  const GR = ticks(RS.slice(5).flatMap(s => s.bars.map(b => Object.assign({ _date: s.date }, b))), 'TKR', []);
+  FICHIERS['_footprint_eth_TKR.json'] = { sessions: RS };
+  complet(GR, M, D); await servir();
+  const images = []; let XR = null;
+  for (let k = 0; k < 100 && !XR; k++) { const t = performance.now(); XR = D.calcul(GR, M); images.push(performance.now() - t); }
+  assert.ok(!images.some((v, k) => k >= 2 && v > 8 && images[k - 1] > 8 && images[k - 2] > 8), 'pas trois images lentes de suite : ' + images.map(v => v.toFixed(1)).join(' '));
+  assert.equal(XR.cour.partiel, null, 'novembre complété sur barres réelles');
+  egal(XR.cour, reference(RS.flatMap(s => s.bars)), 'novembre complété = toutes les séances');
+  console.log('  complétion de cinq séances réelles, images :', images.map(v => v.toFixed(1)).join(' '), 'ms');
+
+  // Chart starting at the second minute of 6/10: the first minute comes from the file.
+  const G3 = ticks(B.filter(b => b._date > '2026-10-06' || (b._date === '2026-10-06' && b.m >= 1)), 'TK2');
+  cour(G3, M, D); await servir();
+  egal(cour(G3, M, D), reference(parDate(B, d => d >= '2026-10')), 'minute manquante prise au fichier');
+
+  // File without 1/10 (no earlier session either): masked. Gap 2/10 → 12/10: masked. Lone day missing: passes.
+  const sans1 = tous.filter(d => d >= '2026-10-02'), G4 = ticks(B.filter(b => b._date >= '2026-10-06'), 'TK3', sans1);
+  cour(G4, M, D); await servir();
+  assert.equal(cour(G4, M, D).partiel, '2026-10-06', 'fichier sans le 1er : masqué');
+  const G5 = ticks(B.filter(b => b._date >= '2026-10-13'), 'TK4', tous.filter(d => d < '2026-10-05' || d > '2026-10-09'));
+  cour(G5, M, D); await servir();
+  assert.equal(cour(G5, M, D).partiel, '2026-10-13', 'trou du 2 au 12 : masqué');
+
+  // Minute chart starting on 6/10: masked, no fetch.
+  const avant = appels.length;
+  assert.equal(cour(g(B.filter(b => b._date >= '2026-10-06'), { sym: 'TK5' }), M, D).partiel, '2026-10-06', 'graphe en minutes : masqué');
+  assert.equal(appels.length, avant, 'graphe en minutes : rien lu');
 }
 
 // 7. Bars without levels are counted, not invented; none at all gives a reason. No dates: session only.
