@@ -15,10 +15,14 @@ const PAYLOAD = process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Terminal/payloa
 const DB = path.join(process.env.TT_DATA || path.join(process.env.HOME, '.local/share/TurningTrade'), '_footprint_db_rec_ES.json');
 
 const db = JSON.parse(fs.readFileSync(DB, 'utf8'));
+// The fake chart holds the archive sessions loaded from their first hour to 16:00 ET: the study hides
+// the profile of a session the chart does not load entirely, and the archive grows live (a session
+// joined late, cut, or still in Asia), so only the missing-data checks of section 9 build such sessions.
+const pleines = db.sessions.filter(s => s.bars[0].m <= 60 && s.bars.some(b => b.m >= 1320));
 const bars = [];
-for (const s of db.sessions) for (const b of s.bars) bars.push(Object.assign({ _date: s.date }, b));
-// Session profile of the fake bundle: the last session that reaches 16:00 ET, the archive may end in the Asian session.
-const last = db.sessions.findLast(s => s.bars.some(b => b.m >= 1320));
+for (const s of pleines) for (const b of s.bars) bars.push(Object.assign({ _date: s.date }, b));
+// Session profile of the fake bundle: the chart's last session.
+const last = pleines[pleines.length - 1];
 
 // One context holds TT's contract and profile builder, the study, and a fake chart window.
 let horloge = 0;
@@ -240,11 +244,11 @@ const sierra = [pane('session', { title: 'Delta' }), pane('session', { title: 'V
   assert.ok(rec.filter(x => x.k === 'zone').length === 0 && rec.filter(x => x.k === 'ligne').length === N.ledge.length, 'ledges seuls');
   rec.length = 0; E.dessine(g(), avec({ opac: 0, etiq: false }));
   assert.equal(rec.filter(x => x.k === 'zone' || x.k === 'texte').length, 0, 'sans remplissage ni étiquettes');
-  // Two scopes: each label names its profile. The visible window shows Oct 14, whose nodes
-  // sit at other prices than the last session's; on the same prices one label is kept.
+  // Two scopes: each label names its profile. The visible window shows the chart's second
+  // session, whose nodes sit at other prices than the last session's; on the same prices one label is kept.
   panes([pane('session'), pane('visible')]);
-  const d14 = db.sessions[0].bars.length;
-  vue = [d14, d14 + db.sessions[1].bars.length];
+  const d14 = pleines[0].bars.length;
+  vue = [d14, d14 + pleines[1].bars.length];
   rec.length = 0; E.dessine(g({ premiere: d14 }), defaut);
   vue = [bars.length - 300, bars.length];
   const S = rec.filter(x => x.k === 'texte').map(x => x.s);
@@ -280,4 +284,84 @@ const sierra = [pane('session', { title: 'Delta' }), pane('session', { title: 'V
   console.log('OK', bars.length, 'barres ES,', reels.length, 'profils réels |',
     reels.map(x => x.cle.slice(5) + ' ' + x.rangees + 'r×' + x.pas + ' ' + x.n.join('/')).join(', '),
     '(HVN/LVN/ledge/shelf) | froid', froid.toFixed(2), 'ms, chaud', chaud.toFixed(3), 'ms, détection', detection.toFixed(3), 'ms');
+}
+
+// 9. Missing data: a profile the chart does not load entirely is hidden, with its reason, and its
+// bundle is not analysed: session joined late, cut, or a TT filler block; composite holding fewer
+// sessions than asked, or one of the chart's sessions partly loaded. Synthetic one-minute sessions.
+{
+  const seance = (date, m0 = 0, m1 = 1379) => Array.from({ length: m1 - m0 + 1 }, (_, k) => ({ _date: date, m: m0 + k, o: 5000, h: 5001, l: 4999, c: 5000, v: 1, lv: [[5000, 1, 1]] }));
+  const comble = date => Array.from({ length: 8 }, () => ({ _trou: true, _date: date, m: 0, o: 5000, h: 5000, l: 5000, c: 5000, lv: [] }));
+  const sansDate = B => B.map(b => { const c = Object.assign({}, b); delete c._date; return c; });
+  // Bundle with known nodes (two HVN, one LVN); a composite says how many sessions it found.
+  const P = profil(gauss(100, [[30, 100, 5], [70, 60, 5]]));
+  let jours = { days: 90, daysAsked: 90, dateFrom: '2026-10-13' };
+  ctx.caVppBundle = (scope, opt) => { appels.push([scope, opt && opt.days]); return Object.assign({ profile: P }, scope === 'rolling' ? jours : {}); };
+  // A symbol per chart, so that each one is computed afresh.
+  let nc = 0;
+  const graphe = (B, o = {}) => Object.assign(g({ B }), { sym: 'MQ' + nc++ }, o);
+  const etat = (B, r, o) => JSON.parse(JSON.stringify(E.calcul(graphe(B, o), r).profils.map(p => [p.nom, p.noeuds ? p.noeuds.hvn.length : p.raison + (p.detail ? ' (' + p.detail + ')' : '')])));
+  const SVP = avec({ source: 'session' }), CMP = avec({ source: 'rolling' });
+  const PARTIELLE = 'Nœuds VP : séance chargée en partie', COMPOSITE = 'Nœuds VP : composite chargé en partie';
+  const trois = (a, b, c) => seance('2026-10-13', ...a).concat(seance('2026-10-14', ...b), seance('2026-10-15', ...c));
+
+  // Session: the last one joined at 03:21 ET (m 561) is hidden, and TT's builder is not even called.
+  appels.length = 0;
+  assert.deepEqual(etat(trois([], [], [561, 900]), SVP), [['SVP', PARTIELLE]], 'séance prise en cours');
+  assert.deepEqual(appels, [], 'profil non demandé à TT');
+  assert.deepEqual(etat(trois([], [], [0, 900]), SVP), [['SVP', 2]], 'séance en cours prise à l\'ouverture : nœuds');
+  // Scrolled back onto a closed session: it must reach 4 h before its end (13:00 ET); Oct 22 stopped at 07:37 ET.
+  const coupee = trois([], [0, 817], []), sur14 = { premiere: 1380, derniere: 1380 + 400 };
+  assert.deepEqual(etat(coupee, SVP, sur14), [['SVP', PARTIELLE]], 'séance close tronquée');
+  assert.deepEqual(etat(trois([], [0, 1200], []), SVP, sur14), [['SVP', 2]], 'clôture anticipée à 14:00 : nœuds');
+  // The last bar on screen on TT's filler block for a missing day.
+  const trou = seance('2026-10-13').concat(comble('2026-10-14'), seance('2026-10-15'));
+  assert.deepEqual(etat(trou, SVP, { premiere: 1380, derniere: 1385 }), [['SVP', PARTIELLE]], 'bloc de comblement');
+  // Replay: TT marks the bar in progress _trou while it has nothing for it yet; the session stays whole.
+  const rejeu = trois([], [], [0, 900]).concat([{ _trou: true, _enCours: true, _date: '2026-10-15', m: 901, o: 5000, h: 5000, l: 5000, c: 5000, lv: [] }]);
+  assert.deepEqual([etat(rejeu, SVP), etat(rejeu, CMP)], [[['SVP', 2]], [['CMP 90', 2]]], 'rejeu : barre en cours marquée _trou');
+  // Footprint: whole history passed (premiere 0, derniere n - 1), bars without _date; the session is the one
+  // of the last bar inside the 1000 px frame, found on g.x.
+  const fp = sansDate(coupee), cadre = i0 => ({ premiere: 0, derniere: fp.length - 1, x: i => i - i0 });
+  assert.deepEqual(etat(fp, SVP, cadre(400)), [['SVP', PARTIELLE]], 'footprint : séance tronquée à l\'écran');
+  assert.deepEqual(etat(fp, SVP, cadre(fp.length - 1000)), [['SVP', 2]], 'footprint : dernière séance à l\'écran');
+
+  // Composite: TT found 20 sessions for 90 asked.
+  const ouverte = trois([], [], [0, 900]);
+  jours = { days: 20, daysAsked: 90, dateFrom: '2026-10-13' };
+  assert.deepEqual(etat(ouverte, CMP), [['CMP 90', COMPOSITE + ' (20/90)']], 'composite court');
+  jours = { days: 90, daysAsked: 90, dateFrom: '2026-10-13' };
+  assert.deepEqual(etat(ouverte, CMP), [['CMP 90', 2]], 'composite complet');
+  // One of the chart's sessions inside the composite is cut; the same session before its first date does not count.
+  assert.deepEqual(etat(coupee, CMP), [['CMP 90', COMPOSITE + ' (2026-10-14)']], 'séance tronquée dans le composite');
+  jours = { days: 90, daysAsked: 90, dateFrom: '2026-10-15' };
+  assert.deepEqual(etat(coupee, CMP), [['CMP 90', 2]], 'séance tronquée avant le composite');
+  jours = { days: 90, daysAsked: 90, dateFrom: '2026-10-13' };
+  assert.deepEqual(etat(trois([], [], [561, 900]), CMP), [['CMP 90', COMPOSITE + ' (2026-10-15)']], 'séance en cours prise en cours');
+  // A day TT fills with a blank is not one of the chart's sessions: the composite takes its days elsewhere.
+  assert.deepEqual(etat(trou, CMP), [['CMP 90', 2]], 'bloc de comblement hors du composite');
+  // Footprint: past days come from TT's daily archive, only the session in progress is checked.
+  assert.deepEqual(etat(fp, CMP), [['CMP 90', 2]], 'footprint : séance passée tronquée ignorée');
+  assert.deepEqual(etat(sansDate(trois([], [], [561, 900])), CMP), [['CMP 90', COMPOSITE]], 'footprint : séance en cours prise en cours');
+
+  // Both panels, scrolled back onto the cut session, before the composite's first date: the composite's
+  // nodes are drawn, the session's reason is written instead of its nodes.
+  panes([pane('session'), pane('rolling')]);
+  jours = { days: 90, daysAsked: 90, dateFrom: '2026-10-15' };
+  const vu = Object.assign({ y: p => (5030 - p) * 10 }, sur14), N = E.outils.detecter(P, defaut);
+  rec.length = 0; E.dessine(graphe(coupee, vu), defaut);
+  const T = rec.filter(x => x.k === 'texte');
+  assert.deepEqual(T.filter(x => x.x === 8).map(x => x.s), [PARTIELLE + ' · SVP'], 'raison du SVP en haut à gauche');
+  assert.ok(T.some(x => x.s === 'HVN · CMP 90') && T.every(x => x.x === 8 || / · CMP 90$/.test(x.s)), 'nœuds du composite seuls');
+  assert.equal(rec.filter(x => x.k === 'zone').length, N.hvn.length + N.lvn.length + N.shelf.length, 'zones du composite seules');
+  // Cost of the check on a tick-sized chart (20 sessions of 10 000 bars), only paid when a profile is rebuilt.
+  const gros = [];
+  for (let s = 0; s < 20; s++) for (let k = 0; k < 10000; k++) gros.push({ _date: '2026-10-' + String(1 + s).padStart(2, '0'), m: k * 0.1379 });
+  const G = { n: gros.length, premiere: gros.length - 2000, derniere: gros.length - 1, seance: 'eth', cadre: { droite: 1e9 }, barre: i => gros[i], x: i => i };
+  const cout = scope => { let t = Infinity; for (let k = 0; k < 5; k++) { const t0 = performance.now(); E.outils.manque(G, scope, jours); t = Math.min(t, performance.now() - t0); } return t; };
+  jours = { days: 90, daysAsked: 90, dateFrom: '2026-01-01' };
+  const cS = cout('session'), cR = cout('rolling');
+  assert.ok(cS < 2 && cR < 8, 'vérification : séance ' + cS.toFixed(2) + ' ms, composite ' + cR.toFixed(2) + ' ms');
+  console.log('OK données manquantes : séance prise en cours, tronquée, comblée, composite court ou troué, footprint | vérification sur',
+    gros.length, 'barres : séance', cS.toFixed(2), 'ms, composite', cR.toFixed(2), 'ms');
 }
