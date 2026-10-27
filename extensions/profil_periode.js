@@ -39,8 +39,8 @@ var BUDGET_MS = 4;
 var POINTILLE = {plein:null, tirets:[6,4], points:[2,3], fins:[1,3], mixte:[8,3,2,3]};
 // Filet des titres de sous-section, le panneau n'en ayant pas.
 var FILET = ' ────────────────────';
-// ponytail: `cout` part de 3 ms, une seance ETH d'une minute lue a froid, pour que la premiere lecture ne suive pas le balayage des barres ; ensuite le cout mesure de la derniere lecture.
-var ETAT = {sig:'', gen:0, n:0, der:'', J:[], prev:null, H:{}, O:{}, cout:3};
+// H : histogrammes des seances closes ; L : leurs lectures en cours ; O : la seance ouverte.
+var ETAT = {sig:'', gen:0, n:0, der:'', J:[], prev:null, H:{}, L:{}, O:{}};
 // Seances closes lues pendant l'image en cours.
 var LUES = 0;
 // ponytail: une premiere barre dans l'heure qui suit le debut de la fenetre vaut debut de periode ; une derniere dans l'heure qui precede la fin d'une fenetre close vaut fin.
@@ -230,14 +230,14 @@ function manquent(a, b){
 function seances(S, g, fin){
   var n = g.n | 0, b0 = n ? g.barre(0) : null, b, c;
   var sig = [g.sym, g.tf, g.seance, g.tick, b0 ? (b0._date || '') + ':' + b0.m : ''].join('|');
-  if(sig !== S.sig || (S.n && n >= S.n && cleBarre(g.barre(S.n - 1)) !== S.der)){ S.sig = sig; S.gen++; S.n = 0; S.J = []; S.prev = null; S.H = {}; S.O = {}; }
+  if(sig !== S.sig || (S.n && n >= S.n && cleBarre(g.barre(S.n - 1)) !== S.der)){ S.sig = sig; S.gen++; S.n = 0; S.J = []; S.prev = null; S.H = {}; S.L = {}; S.O = {}; }
   var J = S.J;
   if(n < S.n){
     while(J.length && J[J.length - 1].deb >= n) J.pop();
     S.prev = n ? g.barre(n - 1) : null;
     if(J.length && S.prev){ J[J.length - 1].fin = n - 1; J[J.length - 1].m1 = +S.prev.m; }
     for(c in S.H) if(+c.split(':')[0] >= J.length - 1) delete S.H[c];
-    S.n = n; S.gen++; S.O = {};
+    S.n = n; S.gen++; S.L = {}; S.O = {};
   }
   var prev = S.prev;
   for(var i = S.n; i < n; i++){
@@ -273,9 +273,13 @@ function vide(){ return {h:new Map(), sans:0, nb:0, deb:-1, fin:-1, m0:null, m1:
 // tick arrondi, valeur [bid, ask]. Une Map : des cles entieres vers 28 000
 // et eparses rendent un objet deux fois plus lent. m0, m1 : minutes de la
 // premiere et de la derniere barre ; trou : une barre de comblement.
-function histo(g, s, f){
-  var H = vide(), h = H.h, t = g.tick || 0.25;
-  for(var i = s.deb; i <= s.fin; i++){
+// Lecture reprenable : les barres i0 a i1 vont dans H jusqu'a l'echeance
+// `fin`, regardee toutes les 256 barres (une seance de NQ, 80 niveaux par
+// barre, coute 10 a 17 ms d'un bloc) ; rend la prochaine barre a lire.
+function lire(g, H, f, i0, i1, fin){
+  var h = H.h, t = g.tick || 0.25;
+  for(var i = i0; i <= i1; i++){
+    if(!((i - i0 + 1) & 255) && maintenant() > fin) return i;
     var b = g.barre(i);
     if(!b || !dans(f, +b.m)) continue;
     if(b._trou){ H.trou = true; continue; }
@@ -293,8 +297,9 @@ function histo(g, s, f){
       }
     }
   }
-  return H;
+  return i1 + 1;
 }
+function histo(g, s, f){ var H = vide(); lire(g, H, f, s.deb, s.fin, Infinity); return H; }
 
 // Fichier minute des bougies (payload/_footprint[_eth][_SYM].json, vingt
 // seances glissantes), lu une fois par fetch et partage par les instances ;
@@ -320,32 +325,39 @@ function minutes(g){
 // fichier n'est pas lu ou si ces barres ne la couvrent pas : debut de la
 // periode absent, seance entamee en retard ou tronquee, plus d'un jour ouvre
 // sans seance, derniere barre plus d'une heure avant la premiere du graphe.
-// Un graphe en minutes est tire de ce fichier : rien a y ajouter.
-// ponytail: le fichier se lit en une image, 2 ms par seance environ (25 ms pour douze) ; l'etaler comme histoSeance si l'accroc se voit.
-function amorce(C, g, r, J, p){
+// Un graphe en minutes est tire de ce fichier : rien a y ajouter. La lecture
+// du fichier s'etale sur les images (70 a 90 ms pour un mois de NQ) : undefined
+// tant qu'elle n'est pas finie.
+function amorce(C, g, r, J, p, t0){
   var T = r.periode, s = J[0], cal = T === 'sem' || T === 'mois';
   if(p.k0 !== 0 || !s.date) return null;
   var f = fenetre(C, g, r, J, 0), date0 = s.date, dur = DUREE[g.seance] || DUREE.eth, cleDe = T === 'sem' ? semaine : mois;
   var m0 = debut(s.fin - s.deb + 1, function(i){ return g.barre(s.deb + i); }, f);
   if(m0 === null || (ecart(f, m0, dur) < DEBUT_MAX && (!cal || premierOuvre(T, date0)))) return null;
-  var M = typeof g.tf === 'number' ? null : minutes(g), k = [date0, m0, M ? M.pret : '-'].join('|');
-  if(C.amo && C.amo.k === k) return C.amo.A;
+  var M = typeof g.tf === 'number' ? null : minutes(g), base = [date0, m0, M ? M.pret : '-'].join('|');
+  var E = C.amo && C.amo.base === base ? C.amo : null;
+  if(E && E.fini) return E.A;
+  // Etat de la lecture, repris d'une image a l'autre : seance i du fichier, barre j.
+  if(!E) E = C.amo = {base:base, fini:false, A:{k:base, ok:false, H:vide()}, i:0, j:0, e0:null, e1:null, ouvert:!cal, ok:true, vu:false, prec:null};
   // La seance de la premiere barre ne vient du fichier que si le graphe ne la prend pas dans l'heure.
-  var A = {k:k, ok:false, H:vide()}, h = A.H.h, t = g.tick || 0.25, besoin = ecart(f, m0, dur) >= DEBUT_MAX;
+  var A = E.A, h = A.H.h, t = g.tick || 0.25, besoin = ecart(f, m0, dur) >= DEBUT_MAX, fin = t0 + BUDGET_MS, nb = 0;
   var z = Math.min((f ? Math.min(f[1], 1440) : dur) - DEBUT_MAX, dur - FIN_MAX);
-  var S = M && M.pret ? M.S : [], ouvert = !cal, ok = true, vu = false, prec = null;
-  for(var i = 0; i < S.length; i++){
-    var d = String(S[i].date || '').slice(0, 10), B = S[i].bars || [], e0 = null, e1 = null;
-    if(!B.length || d > date0 || (!cal && d !== date0)) continue;
-    // Une seance d'avant la periode : son debut est dans le fichier.
-    if(cal && cleDe(d) !== cleDe(date0)){ ouvert = true; prec = d; continue; }
-    if(prec && manquent(prec, d) > 0) ok = false;
-    if(!vu){ vu = true; ouvert = ouvert || premierOuvre(T, d); }
-    for(var j = 0; j < B.length; j++){
-      var b = B[j], lv = b.lv || [];
+  var S = M && M.pret ? M.S : [];
+  for(; E.i < S.length; E.i++, E.j = 0, E.e0 = E.e1 = null){
+    var d = String(S[E.i].date || '').slice(0, 10), B = S[E.i].bars || [];
+    if(!E.j){
+      if(!B.length || d > date0 || (!cal && d !== date0)) continue;
+      // Une seance d'avant la periode : son debut est dans le fichier.
+      if(cal && cleDe(d) !== cleDe(date0)){ E.ouvert = true; E.prec = d; continue; }
+      if(E.prec && manquent(E.prec, d) > 0) E.ok = false;
+      if(!E.vu){ E.vu = true; E.ouvert = E.ouvert || premierOuvre(T, d); }
+    }
+    for(; E.j < B.length; E.j++){
+      if(!(++nb & 255) && maintenant() > fin){ redessiner(); return undefined; }
+      var b = B[E.j], lv = b.lv || [];
       if(b._trou || !dans(f, +b.m) || (d === date0 && +b.m + 1 > m0)) continue;
-      if(e0 === null) e0 = +b.m;
-      e1 = +b.m;
+      if(E.e0 === null) E.e0 = +b.m;
+      E.e1 = +b.m;
       A.H.nb++;
       if(!lv.length){ A.H.sans++; continue; }
       for(var q = 0; q < lv.length; q++){
@@ -358,11 +370,12 @@ function amorce(C, g, r, J, p){
       }
     }
     // Chaque seance entamee dans l'heure ; une veille jusqu'a sa fin, le jour meme jusqu'a l'heure qui precede la premiere barre du graphe.
-    if(d < date0 || besoin) ok = ok && e0 !== null && ecart(f, e0, dur) < DEBUT_MAX && (d < date0 ? e1 >= z : e1 + 1 >= m0 - DEBUT_MAX);
-    prec = d;
+    if(d < date0 || besoin) E.ok = E.ok && E.e0 !== null && ecart(f, E.e0, dur) < DEBUT_MAX && (d < date0 ? E.e1 >= z : E.e1 + 1 >= m0 - DEBUT_MAX);
+    E.prec = d;
   }
-  A.ok = ouvert && ok && prec !== null && (prec === date0 || (!besoin && !manquent(prec, date0)));
-  C.amo = {k:k, A:A};
+  A.ok = E.ouvert && E.ok && E.prec !== null && (E.prec === date0 || (!besoin && !manquent(E.prec, date0)));
+  A.k = base + '|lu';
+  E.fini = true;
   return A;
 }
 
@@ -401,19 +414,30 @@ function ajoute(A, B){
 }
 
 // Histogramme de la seance k dans sa fenetre, partage par les instances.
-// Seance close : en cache ; seance ouverte : relue quand `cleOuv` (sa
-// derniere barre) change. undefined si la lecture deborderait le budget de
-// l'image, estime sur le cout de la derniere seance lue.
+// Seance close : lue une fois, sur autant d'images qu'il faut (BUDGET_MS
+// chacune), puis en cache. Seance ouverte : ses barres closes s'ajoutent au
+// fur et a mesure, la derniere, qui bouge, est relue quand `cleOuv` change.
+// undefined tant que la lecture n'est pas finie.
 function histoSeance(C, g, r, J, k, t0, cleOuv){
-  var f = fenetre(C, g, r, J, k), cle = k + ':' + (f ? f[0] + '-' + f[1] : '*'), close = k < J.length - 1;
-  var O = close ? ETAT.H[cle] : ETAT.O[cle] && ETAT.O[cle].cle === cleOuv ? ETAT.O[cle].H : null;
-  if(O) return O;
-  var t = maintenant();
-  if(t - t0 > 0.5 && t - t0 + ETAT.cout > BUDGET_MS) return undefined;
-  O = histo(g, J[k], f);
-  ETAT.cout = maintenant() - t;
-  if(close){ ETAT.H[cle] = O; LUES++; } else ETAT.O[cle] = {cle:cleOuv, H:O};
-  return O;
+  var f = fenetre(C, g, r, J, k), cle = k + ':' + (f ? f[0] + '-' + f[1] : '*'), s = J[k], fin = t0 + BUDGET_MS;
+  if(k < J.length - 1){
+    if(ETAT.H[cle]) return ETAT.H[cle];
+    var L = ETAT.L[cle] || (ETAT.L[cle] = {H:vide(), i:s.deb});
+    L.i = lire(g, L.H, f, L.i, s.fin, fin);
+    if(L.i <= s.fin) return undefined;
+    delete ETAT.L[cle]; LUES++;
+    return (ETAT.H[cle] = L.H);
+  }
+  var O = ETAT.O[cle];
+  if(!O || O.deb !== s.deb) O = ETAT.O[cle] = {deb:s.deb, H:vide(), i:s.deb, cle:'', R:null};
+  if(O.cle === cleOuv && O.i === s.fin) return O.R;
+  O.i = lire(g, O.H, f, O.i, s.fin - 1, fin);
+  if(O.i < s.fin) return undefined;
+  var R = ajoute(vide(), O.H);
+  R.m0 = O.H.m0; R.m1 = O.H.m1; R.trou = O.H.trou;
+  lire(g, R, f, s.fin, s.fin, Infinity);
+  O.cle = cleOuv; O.R = R;
+  return R;
 }
 
 // POC et aire de valeur sur les volumes V de ticks croissants : depuis le
@@ -446,7 +470,9 @@ function profil(S, p, r, J, D){
 // Profil d'une periode close, calcule une fois ; undefined tant que ses
 // seances ne sont pas toutes lues.
 function fermee(C, g, r, J, p, t0){
-  var A = amorce(C, g, r, J, p), id = p.k0 + ':' + p.k1 + (A ? '|' + A.k : '');
+  var A = amorce(C, g, r, J, p, t0);
+  if(A === undefined) return undefined;
+  var id = p.k0 + ':' + p.k1 + (A ? '|' + A.k : '');
   if(id in C.R) return C.R[id];
   var S = vide(), Hs = [];
   for(var k = p.k0; k <= p.k1; k++){
@@ -489,7 +515,9 @@ function calcul(C, g, r){
   p = P[P.length - 1];
   if(p.k1 < der) R = fermee(C, g, r, J, p, t0);
   else {
-    var last = g.barre(n - 1), L = g.niveaux(n - 1), A = amorce(C, g, r, J, p), ka = A ? '|' + A.k : '';
+    var last = g.barre(n - 1), L = g.niveaux(n - 1), A = amorce(C, g, r, J, p, t0);
+    if(A === undefined){ redessiner(); return null; }
+    var ka = A ? '|' + A.k : '';
     var cleOuv = [n, last && last.c, last && last.h, last && last.l, L.n, L.volume()].join('|'), cle = p.k0 + '|' + cleOuv + ka;
     if(C.cour.cle !== cle){
       var cs = p.k0 + '|' + der + ka, S;

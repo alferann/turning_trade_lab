@@ -557,6 +557,37 @@ if (fs.existsSync(path.join(PAYLOAD, 'hfq-composite-vp.js'))) {
   egal(X.prec[0], reference(parDate(B, d => d === '2026-09-22')), 'première séance');
   const t1 = performance.now(); for (let k = 0; k < 50; k++) { defs[2].dessine(G, rM); E.dessine(G, rJ); } const chaud = (performance.now() - t1) / 100;
   assert.ok(chaud < 2, 'image en cache : ' + chaud.toFixed(3) + ' ms');
+  // NQ-like load: eighty levels per one-minute bar, a session reads in 10 ms or more in one block. The cold
+  // compute of "session + nine previous" and the live session, its last bar moving every frame, stay within
+  // TT's rule: never three frames over 8 ms in a row.
+  const NQ = jours('2026-10-01', '2026-10-14').flatMap((date, s) => Array.from({ length: 1380 }, (_, m) => {
+    const b = Math.round((20000 + 60 * Math.sin(s + m / 150)) * 4) / 4;
+    return { _date: date, m, o: b, h: b + 10, l: b - 10, c: b, lv: Array.from({ length: 80 }, (_, k) => [b - 10 + k * 0.25, 1 + (m + k) % 5, 1 + (k % 4)]) };
+  }));
+  const GN = Bn => g(Bn, { sym: 'NQL', premiere: 0, cadre: { gauche: 0, droite: 1000, haut: 0, bas: 600, largeur: 1000, hauteur: 600 }, x: i => i * 1000 / Bn.length, y: v => 600 - (v - 19900) * 2 });
+  const rN = avec({ hist: 9 }), suite = L => L.some((v, k) => k >= 2 && v > 8 && L[k - 1] > 8 && L[k - 2] > 8);
+  const froid = [];
+  for (let k = 0, X = null; k < 400 && !X; k++) { const t = performance.now(); X = defs[3].calcul(GN(NQ), rN); froid.push(performance.now() - t); }
+  assert.ok(!suite(froid) && Math.max(...froid) < 30, 'NQ à froid : lecture étalée, pas trois images lentes de suite : ' + froid.map(v => v.toFixed(1)).join(' '));
+  const direct = [];
+  for (let k = 1; k <= 30; k++) {
+    const Bn = NQ.slice(), d = Bn[Bn.length - 1];
+    Bn[Bn.length - 1] = Object.assign({}, d, { c: d.c + k * 0.25, lv: d.lv.map(([p, bi, a]) => [p, bi + k, a]) });
+    const t = performance.now(); defs[3].calcul(GN(Bn), rN); direct.push(performance.now() - t);
+  }
+  assert.ok(Math.max(...direct.slice(1)) < 4, 'NQ en direct : la dernière barre seule est relue, pire ' + Math.max(...direct.slice(1)).toFixed(2) + ' ms');
+  egal(cour(GN(NQ), defaut, defs[3]), reference(parDate(NQ, d => d === '2026-10-14')), 'NQ : séance en cours exacte');
+  // A tick chart holding the last two sessions: October completed from a minute file of eight NQ sessions,
+  // read over several frames.
+  const fichierNQ = { sessions: jours('2026-10-01', '2026-10-14').map(date => ({ date, bars: NQ.filter(b => b._date === date).map(({ _date, ...b }) => b) })) };
+  const DN = charger({ HFQSymGuard: { histFile: (t, s) => t + '_' + s + '.json' }, fetch: () => Promise.resolve({ json: () => fichierNQ }) })[2];
+  const GT = g(NQ.filter(b => b._date >= '2026-10-13'), { sym: 'NQF', tf: '1000t' }), rMo = avec({ periode: 'mois' });
+  DN.calcul(GT, rMo); await new Promise(r => setImmediate(r));
+  const fic = []; let XF = null;
+  for (let k = 0; k < 400 && !XF; k++) { const t = performance.now(); XF = DN.calcul(GT, rMo); fic.push(performance.now() - t); }
+  assert.ok(!suite(fic) && Math.max(...fic) < 30, 'NQ : fichier minute lu sur plusieurs images : ' + fic.map(v => v.toFixed(1)).join(' '));
+  egal(XF.cour, reference(NQ), 'NQ : octobre complété par le fichier');
+  console.log('  NQ, 80 niveaux par barre : froid', froid.length, 'images, pire', Math.max(...froid).toFixed(1), 'ms ; fichier', fic.length, 'images, pire', Math.max(...fic).toFixed(1), 'ms ; direct, pire', Math.max(...direct.slice(1)).toFixed(2), 'ms');
   const R = cour(g(), defaut), S = cour(g(), avec({ periode: 'sem' })), U = cour(g(), avec({ periode: 'us' }));
   console.log('OK', bars.length, 'barres ES,', db.sessions.length, 'séances | séance POC', (R.poc * 0.25).toFixed(2), 'VA', (R.val * 0.25).toFixed(2), '-', (R.vah * 0.25).toFixed(2),
     '| RTH POC', (U.poc * 0.25).toFixed(2), '| semaine POC', (S.poc * 0.25).toFixed(2), '|', B.length, 'barres synthétiques,', images, 'images, pire', pire.toFixed(2), 'ms, chaud', chaud.toFixed(3), 'ms');
