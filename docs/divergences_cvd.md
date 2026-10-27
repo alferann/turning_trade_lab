@@ -10,7 +10,7 @@ Le CVD (delta cumulé) additionne, barre après barre, les contrats échangés �
 
 ## Un peu de maths
 
-**Le CVD.** À l'ancrage, le compteur repart de zéro. Puis pour chaque barre, CVD = CVD précédent + (volume à l'ask − volume au bid). L'ancrage est la séance du graphe, ou 09h30 New York si vous choisissez RTH sur un graphe ETH.
+**Le CVD.** À l'ancrage, le compteur repart de zéro. Puis pour chaque barre, CVD = CVD précédent + (volume à l'ask − volume au bid). L'ancrage est la séance du graphe, ou 09h30 New York si vous choisissez RTH sur un graphe ETH. Le cumul part toujours de l'ancrage, même quand l'écran commence des heures après lui.
 
 **Les pivots.** Une barre est un pivot haut si aucune des L barres à sa gauche ni des L barres à sa droite n'a un haut plus élevé. Même chose en miroir pour un pivot bas. L vaut « Pivot court ». Un pivot de niveau moyen est un pivot court qui domine K pivots courts de chaque côté ; le niveau long fait pareil avec les pivots moyens. Deux barres voisines au même prix comptent pour un seul pivot, le dernier.
 
@@ -51,6 +51,8 @@ Ce que ça change pour la décision : une divergence confirmée au niveau où vo
 - **Notification** de bureau pour chaque formation et chaque confirmation de la séance.
 
 Le volet CVD dessine le delta cumulé en chandeliers, un par barre, du cumul d'ouverture au cumul de clôture, avec l'axe zéro. La mèche montre le plus haut et le plus bas atteints par le cumul pendant la barre. Seule la tape (les exécutions une à une) donne cet ordre, et TT ne la fournit que pour la séance affichée, en direct ou rejouée. Une barre n'a donc de mèche que si sa tape redonne exactement son delta : les séances précédentes, ou une barre où la tape commence ou s'interrompt, gardent le corps seul. Au chargement d'une séance chargée, les mèches apparaissent en quelques images.
+
+**Rien n'est tracé sur des données manquantes.** Un CVD n'est juste que cumulé en entier depuis son ancrage. Une séance de CVD (la séance du graphe, ou chacune de ses deux parties avec l'ancrage RTH) prise après son ancrage, ou qui contient une barre de comblement, une barre sans niveaux (son delta est inconnu, pas nul) ou un trou de plus de 10 minutes au-delà de la durée d'une barre (le seuil des marques « sans donnée » de Turning Trade ; une heure sur les graphes en ticks, en volume ou en range), n'a ni CVD ni divergence à partir de là, jusqu'à la séance suivante. Ce qui précède le trou est juste et reste tracé. La légende « séance incomplète » le signale en haut à gauche, sur le prix et dans le volet.
 
 ## Configurer
 
@@ -100,6 +102,12 @@ Les réglages de détection, de filtrage et de couleur vivent sur l'étude **Div
 - Pour ne voir que ce qui a marché : décocher « Montrer les cassées ».
 - Les réglages sont mémorisés par type de graphe, pas par instrument : un seuil en contrats réglé pour ES sera trop haut pour NQ.
 
+## Limites connues
+
+- Une séance prise en cours est masquée jusqu'à sa fin. Avec l'ancrage RTH, sa partie RTH revient dès 09h30 : un graphe NQ chargé à partir de 03h21 garde son CVD et ses divergences de la séance de New York.
+- Les seuils de trou suivent ceux de Turning Trade sur les graphes en minutes. Sur les graphes en ticks, en volume ou en range, faute de durée de barre, seul un trou de plus d'une heure est vu.
+- Au premier affichage d'une très longue séance de CVD (graphe en ticks fin, ancrage ETH), la lecture depuis l'ancrage s'étale sur quelques images, sans rien tracer pendant ce temps.
+
 ---
 
 # CVD Divergences · getting started
@@ -112,7 +120,7 @@ CVD (cumulative volume delta) adds up, bar after bar, contracts traded at the as
 
 ## A bit of math
 
-**CVD.** At the anchor the counter restarts from zero. Then for each bar, CVD = previous CVD + (ask volume − bid volume). The anchor is the chart's session, or 09:30 New York if you pick RTH on an ETH chart.
+**CVD.** At the anchor the counter restarts from zero. Then for each bar, CVD = previous CVD + (ask volume − bid volume). The anchor is the chart's session, or 09:30 New York if you pick RTH on an ETH chart. The total always starts at the anchor, even when the screen starts hours after it.
 
 **Pivots.** A bar is a pivot high if none of the L bars to its left or the L bars to its right has a higher high. Mirror this for a pivot low. L is "Short pivot". An intermediate pivot is a short pivot that dominates K short pivots on each side; the long level does the same with intermediate pivots. Two neighbouring bars at the same price count as one pivot, the last one.
 
@@ -153,6 +161,8 @@ What it changes for a decision: a confirmed divergence at a level where you alre
 - **Desktop notification** for each forming and each confirmed divergence of the session.
 
 The CVD pane draws cumulative delta as candles, one per bar, from the opening to the closing total, with the zero axis. The wick shows the highest and lowest total reached during the bar. Only the tape (trades one by one) gives that order, and TT only serves it for the displayed session, live or replayed. A bar therefore gets a wick only if its tape gives back exactly its delta: earlier sessions, or a bar where the tape starts or breaks off, keep the body alone. When a busy session loads, wicks appear within a few frames.
+
+**Nothing is drawn from missing data.** A CVD is only right when summed in full from its anchor. A CVD session (the chart's session, or each of its two parts with the RTH anchor) joined after its anchor, or holding a filler bar, a bar without levels (its delta is unknown, not zero) or a hole of more than 10 minutes beyond one bar's duration (the threshold of Turning Trade's "no data" marks; one hour on tick, volume or range charts) has no CVD nor divergence from there on, until the next session. What comes before the hole is right and stays drawn. The "incomplete session" caption says so at the top left, on price and in the pane.
 
 ## Settings
 
@@ -201,3 +211,9 @@ Detection, filter and colour settings live on **Divergences CVD · prix**. The C
 - Too many lines in 1 minute: "Min CVD gap" around 250 contracts on ES, or "Min relative strength" at 0.5 which works for every instrument, or untick "Short level".
 - To see only what worked: untick "Show broken ones".
 - Settings are stored per chart type, not per instrument: a contract threshold tuned for ES will be too high for NQ.
+
+## Known limits
+
+- A session joined late is hidden until its end. With the RTH anchor its RTH part comes back from 09:30: an NQ chart loaded from 03:21 keeps its CVD and divergences of the New York session.
+- Hole thresholds follow Turning Trade's on minute charts. On tick, volume or range charts, with no bar duration, only a hole of more than one hour is seen.
+- The first time a very long CVD session shows (fine tick chart, ETH anchor), reading it from the anchor spreads over a few frames, with nothing drawn meanwhile.
