@@ -217,6 +217,14 @@ const lu = notes => notes.map(t => { const m = /^ES · (.+) ([HL]) \| .+ : ([\d.
   }
   assert.equal(trace(avec({ us: false })).length, 2 * Object.keys(P.D).length - 2, 'New York décoché');
   assert.ok(rec.some(x => x.k === 'texte' && x.s === 'Londres H') && !rec.some(x => x.k === 'texte' && x.s.startsWith('New York')), 'étiquettes');
+  // Labels on the left by default: at the start of the line, or at the frame's left edge when it starts off-frame.
+  const lon = P.D.eu.H, cote = (r, G = g()) => { rec.length = 0; E.dessine(G, r); return rec.find(x => x.k === 'texte' && x.s === 'Londres H'); };
+  const a = cote(defaut);
+  assert.deepEqual([a.x, a.o.align], [lon.i + 3, 'left'], 'étiquette au début du trait');
+  const b = cote(avec({ etiqPos: 'droite' }));
+  assert.deepEqual([b.x, b.o.align], [(lon.m >= 0 ? lon.m : 1e6) - 3, 'right'], 'étiquette au bout du trait');
+  const c = cote(defaut, Object.assign(g(), { cadre: { gauche: lon.i + 50, droite: 1e6, haut: 0, bas: 500 } }));
+  assert.equal(c.x, lon.i + 53, 'étiquette collée au bord gauche du cadre');
 }
 
 // 9. Slow bars: the first pass takes several frames, draws nothing meanwhile, and ends as one pass.
