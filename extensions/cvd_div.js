@@ -265,8 +265,22 @@ function preTir(S, r, H, sens, sig){
   return {t:(sens > 0 ? (cB < cA ? 'UE' : 'UA') : (cB > cA ? 'DE' : 'DA')), a:A, niv:v[A], up:(sens > 0 ? 1 : 0)};
 }
 
+// Premier index de [deb, fin] dont l'abscisse atteint x, fin + 1 sinon : g.x
+// croit avec l'index.
+function borne(g, deb, fin, x){
+  while(deb <= fin){ var m = (deb + fin) >> 1; if(g.x(m) < x) deb = m + 1; else fin = m - 1; }
+  return deb;
+}
+// Barres a l'ecran, une de part et d'autre du cadre. Le footprint passe tout
+// l'historique dans premiere..derniere, pas seulement les barres a l'ecran.
+function vue(g){
+  var deb = Math.max(0, g.premiere | 0), fin = Math.min(g.derniere | 0, (g.n | 0) - 1);
+  deb = Math.max(deb, borne(g, deb, fin, g.cadre.gauche) - 1);
+  return [deb, Math.min(fin, borne(g, deb, fin, g.cadre.droite))];
+}
+
 function calc(g, r){
-  var i0 = Math.max(0, g.premiere - 300), i1 = g.derniere;
+  var V = vue(g), i0 = Math.max(0, V[0] - 300), i1 = V[1];
   if(!(i1 > i0)) return null;
   var idx = [], hi = [], lo = [], cv = [], dl = [], sk = [], mn = [];
   var cum = 0, cle = null, aDelta = false;
@@ -385,9 +399,9 @@ function meches(g, S, d0, t0){
 // fenetre, la derniere barre (prix et delta) et les reglages de detection.
 var CACHE = {cle:'', S:null};
 function cleDe(g, r){
-  var b = g.barre(g.derniere) || {};
-  var L = (typeof g.niveaux === 'function') ? g.niveaux(g.derniere) : null;
-  return [g.sym, g.tf, g.seance, g.n, g.premiere, g.derniere, b.c, b.h, b.l, (L && L.n) ? L.deltaTotal() : 0,
+  var V = vue(g), b = g.barre(V[1]) || {};
+  var L = (typeof g.niveaux === 'function') ? g.niveaux(V[1]) : null;
+  return [g.sym, g.tf, g.seance, g.n, V[0], V[1], b.c, b.h, b.l, (L && L.n) ? L.deltaTotal() : 0,
           DETECTION.map(function(d){ return r[d.k]; }).join('|')].join('|');
 }
 function calcCache(g, r){
@@ -635,8 +649,8 @@ HFQExt.etude({
     }
 
     // Seules les barres visibles passent par g.y : l'amorce hors ecran n'ecrase pas l'echelle.
-    var d0 = 0;
-    while(d0 < S.idx.length && S.idx[d0] < g.premiere) d0++;
+    var d0 = 0, v0 = vue(g)[0];
+    while(d0 < S.idx.length && S.idx[d0] < v0) d0++;
 
     if(r.style === 'bougies' && c){
       var pas = (S.idx.length > 1) ? Math.abs(g.x(S.idx[1]) - g.x(S.idx[0])) : 4 * e;
