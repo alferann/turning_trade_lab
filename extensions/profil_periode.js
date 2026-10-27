@@ -56,6 +56,7 @@ var EN = {
   'Depuis la première barre, vers la droite':'From the first bar, facing right', 'Depuis la clôture, vers la gauche':'From the close, facing left',
   'Calcul sur RTH seul (graphe ETH)':'Computed on RTH only (ETH chart)', 'Value Area %':'Value Area %',
   'Largeur au bord droit (% du graphe)':'Width at the right edge (% of chart)', 'Largeur sur la période (% de sa durée)':'Width on the period (% of its span)',
+  'Largeur maximale (% du graphe)':'Maximum width (% of chart)', 'masqué':'hidden',
   'Ticks par rangée (0 = auto)':'Ticks per row (0 = auto)', 'Affichage du volume':'Volume display',
   'Acheteurs et vendeurs empilés':'Buyers and sellers stacked', 'Total, coloré par la Value Area':'Total, colored by the Value Area',
   'Couleur acheteurs':'Buyers color', 'Opacité acheteurs':'Buyers opacity', 'Couleur vendeurs':'Sellers color', 'Opacité vendeurs':'Sellers opacity',
@@ -323,7 +324,8 @@ function fermee(C, g, r, J, p, t0){
 // Profils de la periode en cours (la derniere) et des `hist` precedentes
 // visibles. Les seances closes se calculent une fois, au plus BUDGET_MS par
 // image (rien n'est dessine avant la fin) ; la seance ouverte se relit quand
-// la derniere barre bouge. Une periode precedente partielle est omise.
+// la derniere barre bouge. Une periode precedente partielle ou a barres sans
+// niveaux est omise ; la periode en cours l'est au dessin, legende gardee.
 function calcul(C, g, r){
   var t0 = maintenant(), J = seances(ETAT, g, t0 + BUDGET_MS), n = g.n | 0;
   LUES = 0;
@@ -343,7 +345,7 @@ function calcul(C, g, r){
     if(J[p.k1].fin < g.premiere || J[p.k0].deb > g.derniere) continue;
     R = fermee(C, g, r, J, p, t0);
     if(R === undefined){ redessiner(); return null; }
-    if(R && !R.partiel) prec.push(R);
+    if(R && !R.partiel && !R.sans) prec.push(R);
   }
 
   p = P[P.length - 1];
@@ -428,7 +430,10 @@ function dessine(C, rang, g, r){
   // Une ligne de texte par instance en haut du graphe, pour ne pas se chevaucher.
   var yTxt = F.haut + (12 + 13 * rang) * e;
   if(X.raison) g.texte(F.gauche + 8 * e, yTxt, tr(X.raison), {couleur:'#8a929c', taille:10});
-  var tous = X.cour ? X.prec.concat([X.cour]) : X.prec;
+  // Rien de dessine sur une periode en cours incomplete : seule la legende dit pourquoi.
+  var masque = X.cour && (X.cour.partiel || X.cour.sans);
+  var tous = X.cour && !masque ? X.prec.concat([X.cour]) : X.prec;
+  if(masque) legende(g, r, X.cour, yTxt);
   if(!tous.length) return;
 
   // Rangees d'au moins RANGEE_PX en auto ; colonne lue sur la projection.
@@ -437,13 +442,14 @@ function dessine(C, rang, g, r){
   var pas = r.rangee >= 1 ? r.rangee | 0 : Math.max(1, Math.ceil(RANGEE_PX * e / Math.max(hTick, 1e-9)));
   var col = Math.abs(g.x(g.premiere + 1) - g.x(g.premiere));
   var Q = {hors:[], va:[], poc:[], achat:[], vente:[], achatH:[], venteH:[], cadre:[]}, LP = [], LV = [], x0, x1;
+  var wMax = F.largeur * (+r.largeurMax || 100) / 100;
   for(k = 0; k < tous.length; k++){
     R = tous[k];
     var xa = g.x(R.deb) - col / 2, xb = g.x(R.fin) + col / 2, cour = R === X.cour;
     if(r.profil){
-      if(cour && r.place === 'droite') histogramme(Q, g, r, R, pas, F.droite, -1, F.largeur * r.largeur / 100);
-      else if(r.sens === 'passe') histogramme(Q, g, r, R, pas, xb, -1, (xb - xa) * r.largeurP / 100);
-      else histogramme(Q, g, r, R, pas, xa, 1, (xb - xa) * r.largeurP / 100);
+      if(cour && r.place === 'droite') histogramme(Q, g, r, R, pas, F.droite, -1, Math.min(wMax, F.largeur * r.largeur / 100));
+      else if(r.sens === 'passe') histogramme(Q, g, r, R, pas, xb, -1, Math.min(wMax, (xb - xa) * r.largeurP / 100));
+      else histogramme(Q, g, r, R, pas, xa, 1, Math.min(wMax, (xb - xa) * r.largeurP / 100));
     }
     // La periode en cours prolonge ses niveaux jusqu'au bord droit, les precedentes s'arretent a leur cloture.
     x0 = cour ? Math.max(F.gauche, xa) : xa; x1 = cour ? F.droite : xb;
@@ -463,7 +469,7 @@ function dessine(C, rang, g, r){
   if(r.vaL) g.trait(LV, {couleur:r.vaLC, epaisseur:+r.vaLE || 1, pointille:POINTILLE[r.vaLT] || null, opacite:+r.vaLO});
 
   R = X.cour;
-  if(!R) return;
+  if(!R || masque) return;
   // Prix des niveaux au-dessus de leur ligne, au bord gauche ou au debut de la periode.
   if(r.etiq){
     var nom = function(niv){ return (PREFIXE[T] || '') + niv + (SUFFIXE[T] ? ' ' + tr(SUFFIXE[T]) : ''); };
@@ -471,12 +477,16 @@ function dessine(C, rang, g, r){
     for(k = 0; k < niv.length; k++) if(niv[k][2])
       g.texte(xl, g.y(niv[k][1] * t) - 2 * e, nom(niv[k][0]) + ' ' + prix(niv[k][1], t), {couleur:niv[k][3], taille:10, base:'bottom'});
   }
-  // Les mises en garde s'affichent meme sans etiquettes.
-  if(!r.etiq && !R.partiel && !R.sans) return;
-  var titre = tr(R.nom) + (R.cle ? ' ' + R.cle : '');
-  if(R.partiel) titre += ' · ' + tr('partiel, depuis le') + ' ' + R.partiel;
-  if(R.sans) titre += ' · ' + Math.round(100 * R.sans / R.nb) + ' % ' + tr('des barres sans niveaux');
-  g.texte(F.droite - 4 * e, yTxt, titre, {couleur:'#8a929c', taille:10, align:'right'});
+  if(r.etiq) legende(g, r, R, yTxt);
+}
+
+// Legende de la periode en cours, et pourquoi elle est masquee.
+function legende(g, r, R, y){
+  var e = g.echelle || 1, titre = tr(R.nom) + (R.cle ? ' ' + R.cle : ''), pq = [];
+  if(R.partiel) pq.push(tr('partiel, depuis le') + ' ' + R.partiel);
+  if(R.sans) pq.push(Math.round(100 * R.sans / R.nb) + ' % ' + tr('des barres sans niveaux'));
+  if(pq.length) titre += ' · ' + tr('masqué') + ' : ' + pq.join(', ');
+  g.texte(g.cadre.droite - 4 * e, y, titre, {couleur:'#8a929c', taille:10, align:'right'});
 }
 
 function reglages(periode){
@@ -487,8 +497,9 @@ function reglages(periode){
     {k:'sens',     label:'Profils posés sur leur période', type:'select', defaut:'futur', options:[['futur','Depuis la première barre, vers la droite'],['passe','Depuis la clôture, vers la gauche']]},
     {k:'rth',      label:'Calcul sur RTH seul (graphe ETH)', type:'check', defaut:false},
     {k:'vaPct',    label:'Value Area %', type:'number', defaut:70, min:50, max:95, pas:1},
-    {k:'largeur',  label:'Largeur au bord droit (% du graphe)', type:'number', defaut:25, min:5, max:60, pas:1},
+    {k:'largeur',  label:'Largeur au bord droit (% du graphe)', type:'number', defaut:25, min:5, max:100, pas:1},
     {k:'largeurP', label:'Largeur sur la période (% de sa durée)', type:'number', defaut:60, min:5, max:100, pas:5},
+    {k:'largeurMax', label:'Largeur maximale (% du graphe)', type:'number', defaut:100, min:5, max:100, pas:1},
     {k:'rangee',   label:'Ticks par rangée (0 = auto)', type:'number', defaut:0, min:0, max:100, pas:1},
     {k:'profil',   label:'Histogramme' + FILET, type:'check', defaut:true},
     {k:'mode',     label:'Affichage du volume', type:'select', defaut:'empile', options:[['empile','Acheteurs et vendeurs empilés'],['total','Total, coloré par la Value Area']]},

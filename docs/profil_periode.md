@@ -28,7 +28,7 @@ Ce que ça change pour la décision : comparer la séance du jour à la valeur d
 - **Rangées en volume total** : rangée du POC, rangées de l'aire de valeur et reste, chacune avec sa couleur et son opacité.
 - **Lignes** : POC en trait plein, VAH et VAL en tirets par défaut. Celles de la période en cours vont de son début (ou du bord gauche si elle a commencé hors écran) jusqu'au bord droit ; celles des périodes précédentes s'arrêtent à leur clôture.
 - **Prix à gauche** : « dPOC 6712.25 », « wVAH … », « mVAL … » (séance, semaine, mois), « POC RTH », « VAH Asie », « VAL EU » pour les séances, écrits juste au-dessus de leur ligne, au bord gauche ou au début de la période.
-- **Légende** en haut à droite, une ligne par instance : la période (« Séance 2026-10-16 », « Séance US 2026-10-16 », « Semaine 42 », « Mois 2026-10 »), puis les mises en garde, affichées même étiquettes décochées : « partiel, depuis le … » quand le graphe ne charge pas la période depuis son début, « x % des barres sans niveaux » quand des barres n'ont pas de volume par prix.
+- **Légende** en haut à droite, une ligne par instance : la période (« Séance 2026-10-16 », « Séance US 2026-10-16 », « Semaine 42 », « Mois 2026-10 »), puis, si la période en cours est incomplète, « masqué : » et la raison, affichées même étiquettes décochées : « partiel, depuis le … » quand le graphe ne charge pas la période depuis son début, « x % des barres sans niveaux » quand des barres n'ont pas de volume par prix. Une période incomplète n'est jamais dessinée.
 
 ## Configurer
 
@@ -42,6 +42,7 @@ Ce que ça change pour la décision : comparer la séance du jour à la valeur d
 | Value Area % | Part du volume total contenue dans l'aire de valeur | 70 |
 | Largeur au bord droit (% du graphe) | Longueur de la rangée la plus fournie du profil collé au bord droit | 25 |
 | Largeur sur la période (% de sa durée) | Longueur de la rangée la plus fournie d'un profil posé sur sa période | 60 |
+| Largeur maximale (% du graphe) | Plafond de la rangée la plus fournie de tous les profils, collés au bord droit ou posés sur leur période : un mois posé sur sa période ne couvre plus tout le graphe | 100 |
 | Ticks par rangée (0 = auto) | Regroupe les prix par rangées ; 0 : au moins 3 pixels par rangée, les ticks se regroupent quand on dézoome | 0 |
 | **Histogramme** | Affiche ou masque les rangées | cochée |
 | Affichage du volume | Acheteurs et vendeurs empilés, ou total coloré par la Value Area | empilés |
@@ -55,8 +56,8 @@ Ce que ça change pour la décision : comparer la séance du jour à la valeur d
 
 ### Limites connues
 
-- **Volume lu sur les niveaux des barres.** Une barre sans niveaux ne compte pas et n'est pas devinée : la légende donne la part des barres qui en manquent.
-- **Période partielle.** L'historique ES de TT commence le mardi 22 septembre 2026 : la semaine ou le mois en cours dont le début n'est pas chargé est dessiné quand même, marqué « partiel » ; une semaine ou un mois précédent partiel n'est pas dessiné. Les jours fériés ne sont pas connus : une semaine ouverte par un lundi férié passe pour partielle si l'historique commence juste après.
+- **Volume lu sur les niveaux des barres.** Une barre sans niveaux n'est pas devinée : une période qui en contient n'est pas dessinée, et la légende donne la part des barres qui en manquent.
+- **Période partielle.** L'historique ES de TT commence le mardi 22 septembre 2026 : une semaine ou un mois dont le début n'est pas chargé n'est pas dessiné, en cours comme précédent ; la légende de la période en cours dit « masqué : partiel ». Sur un graphe en ticks, qui ne remonte qu'à deux semaines environ, le mois en cours est donc souvent masqué. Les jours fériés ne sont pas connus : une semaine ouverte par un lundi férié passe pour partielle si l'historique commence juste après.
 - **Séances US, Asie, Europe** : avant 09:30, la dernière séance US est celle de la veille ; elle est alors traitée comme la période en cours. Les heures se règlent dans les sessions monde de TT, pas dans l'étude.
 - **Footprint** : ses barres ne sont pas datées ; seuls la séance du graphe et les séances US, Asie, Europe y sont disponibles, ces dernières avec l'heure d'été du jour.
 - **Prix à gauche** pour la période en cours seulement ; les périodes précédentes n'ont que leurs lignes.
@@ -94,7 +95,7 @@ What it changes for the decision: comparing today's session with yesterday's, th
 - **Total volume rows**: POC row, value area rows and the rest, each with its colour and opacity.
 - **Lines**: POC solid, VAH and VAL dashed by default. The current period's lines run from its start (or the left edge if it started off screen) to the right edge; previous periods' lines stop at their close.
 - **Prices on the left**: "dPOC 6712.25", "wVAH …", "mVAL …" (session, week, month), "POC RTH", "VAH Asia", "VAL EU" for the sessions, written just above their line, at the left edge or at the start of the period.
-- **Caption** top right, one line per instance: the period ("Session 2026-10-16", "US session 2026-10-16", "Week 42", "Month 2026-10"), then the warnings, shown even with labels off: "partial, since …" when the chart does not load the period from its start, "x % of bars without levels" when some bars carry no volume per price.
+- **Caption** top right, one line per instance: the period ("Session 2026-10-16", "US session 2026-10-16", "Week 42", "Month 2026-10"), then, if the current period is incomplete, "hidden:" and the reason, shown even with labels off: "partial, since …" when the chart does not load the period from its start, "x % of bars without levels" when some bars carry no volume per price. An incomplete period is never drawn.
 
 ## Settings
 
@@ -110,6 +111,7 @@ Labels below are those shown when Turning Trade is set to English.
 | Value Area % | Share of total volume held in the value area | 70 |
 | Width at the right edge (% of chart) | Length of the fullest row of the profile pinned to the right edge | 25 |
 | Width on the period (% of its span) | Length of the fullest row of a profile set on its period | 60 |
+| Maximum width (% of chart) | Cap on the fullest row of every profile, pinned to the right edge or set on its period: a month set on its period no longer covers the whole chart | 100 |
 | Ticks per row (0 = auto) | Groups prices into rows; 0: at least 3 pixels per row, ticks merge when zooming out | 0 |
 | **Histogram** | Shows or hides the rows | checked |
 | Volume display | Buyers and sellers stacked, or total colored by the Value Area | stacked |
@@ -123,8 +125,8 @@ Labels below are those shown when Turning Trade is set to English.
 
 ### Known limits
 
-- **Volume read from the bars' levels.** A bar without levels does not count and is not guessed: the caption gives the share of bars lacking them.
-- **Partial period.** TT's ES history starts on Tuesday 22 September 2026: a current week or month whose start is not loaded is still drawn, marked "partial"; a partial previous week or month is not drawn. Holidays are not known: a week opened by a Monday holiday counts as partial if the history starts right after it.
+- **Volume read from the bars' levels.** A bar without levels is not guessed: a period holding one is not drawn, and the caption gives the share of bars lacking them.
+- **Partial period.** TT's ES history starts on Tuesday 22 September 2026: a week or month whose start is not loaded is not drawn, current or previous; the current period's caption says "hidden: partial". On a tick chart, which goes back only about two weeks, the current month is therefore often hidden. Holidays are not known: a week opened by a Monday holiday counts as partial if the history starts right after it.
 - **US, Asian, European sessions**: before 09:30, the last US session is yesterday's; it is then treated as the current period. Hours are set in TT's world sessions, not in the study.
 - **Footprint**: its bars are not dated; only the chart session and the US, Asian, European sessions are available there, the latter with today's daylight saving time.
 - **Prices on the left** for the current period only; previous periods only have their lines.

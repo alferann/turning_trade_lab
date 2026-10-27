@@ -285,9 +285,20 @@ const POINTS = { plein: null, tirets: [6, 4], points: [2, 3] };
   D = dessin(avec({ periode: 'sem' }), g(B, { premiere: 5, x: i => i - 5 }));
   assert.ok(D.traits.every(x => x.p[0][0] === 0) && D.textes[0].x === 4, 'bord gauche');
 
-  // Warnings stay without labels: a partial month with one bar lacking levels.
+  // A partial month, or one with a bar lacking levels, is not drawn; its caption says why, even without labels.
   const P = B.slice(3); P[P.length - 1] = Object.assign({}, P[P.length - 1], { lv: [] });
-  assert.deepEqual(dessin(avec({ periode: 'mois', etiq: false }), g(P)).textes.map(x => x.s), ['Mois 2026-10 · partiel, depuis le 2026-10-13 · 17 % des barres sans niveaux'], 'mises en garde');
+  const DP = dessin(avec({ periode: 'mois', etiq: false }), g(P));
+  assert.deepEqual(DP.textes.map(x => x.s), ['Mois 2026-10 · masqué : partiel, depuis le 2026-10-13, 17 % des barres sans niveaux'], 'mises en garde');
+  assert.ok(!DP.rects.length && !DP.traits.some(x => x.p.length), 'période incomplète masquée');
+  const B1 = B.slice(); B1[B1.length - 1] = Object.assign({}, B1[B1.length - 1], { lv: [] });
+  assert.ok(!dessin(avec({ periode: 'jour' }), g(B1)).rects.length, 'séance à barre sans niveaux masquée');
+  // Maximum width caps the fullest row, pinned to the right edge or on its period.
+  const plusLarge = D => Math.max(...D.rects.filter(x => x.c === r.achatC).map(x => x.w + D.rects.find(y => y.c === r.venteC && y.y === x.y).w));
+  assert.ok(proche(plusLarge(dessin(avec({ periode: 'sem', rangee: 1, largeurMax: 10 }))), 100), 'bord droit plafonné à 10 % du graphe');
+  assert.ok(proche(plusLarge(dessin(avec({ periode: 'sem', rangee: 1, largeur: 80 }))), 800), 'bord droit jusqu\'à 80 %');
+  const etroit = g(H, { premiere: 0, cadre: { gauche: 0, droite: 20, haut: 0, bas: 1e5, largeur: 20, hauteur: 1e5 } });
+  assert.ok(proche(plusLarge(dessin(avec({ hist: 2, rangee: 1, place: 'periode', largeurMax: 5 }), etroit)), 1), 'sur sa période, plafonné à 5 % du graphe');
+  assert.ok(proche(plusLarge(dessin(avec({ hist: 2, rangee: 1, place: 'periode', sens: 'passe', largeurMax: 5 }), etroit)), 1), 'depuis la clôture, plafonné aussi');
   // Rows outside the frame are not painted.
   assert.ok(dessin(avec({ periode: 'sem' }), g(B, { cadre: { gauche: 0, droite: 1000, haut: 0, bas: 25.1, largeur: 1000, hauteur: 25.1 } })).rects.every(x => x.y <= 25.1), 'hors cadre sauté');
   // The reason is written instead of a profile.
