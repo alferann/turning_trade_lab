@@ -11,13 +11,18 @@
 //
 // Le volume vient uniquement des niveaux des barres : une periode qui contient
 // une barre sans niveaux n'est pas dessinee, la legende dit quelle part en manque.
-// Une semaine ou un mois que le graphe ne prend pas a son debut (graphe en
-// ticks) est complete par les barres d'une minute des bougies, sinon masque.
+// Rien n'est dessine non plus sur une periode que le graphe ne charge pas en
+// entier. La premiere periode du graphe, quand il ne la prend pas a son debut
+// (graphe en ticks), est completee par les barres d'une minute des bougies,
+// sinon masquee ; plus loin, une periode entamee en retard, tronquee, ou qui
+// perd une seance (barres de comblement, jours ouvres sans seance) est masquee.
 (function(){
 
 var ET = 'America/New_York';
 // ponytail: minute ET de l'ouverture du graphe, 18:00 en ETH et 09:30 en RTH (ES, NQ).
 var OUVERTURE = {eth:1080, rth:570};
+// ponytail: duree de la seance du graphe en minutes, 23 h en ETH et 6 h 30 en RTH (ES, NQ).
+var DUREE = {eth:1380, rth:390};
 // Memes defauts que hfq-sessions-monde.js : une seance court jusqu'a la suivante.
 var DEFAUTS = [
   {id:'asie', h:18, m:0,  tz:ET},
@@ -38,10 +43,10 @@ var FILET = ' ────────────────────';
 var ETAT = {sig:'', gen:0, n:0, der:'', J:[], prev:null, H:{}, O:{}, cout:3};
 // Seances closes lues pendant l'image en cours.
 var LUES = 0;
-// ponytail: une premiere barre dans l'heure qui suit le debut de la fenetre vaut debut de periode.
+// ponytail: une premiere barre dans l'heure qui suit le debut de la fenetre vaut debut de periode ; une derniere dans l'heure qui precede la fin d'une fenetre close vaut fin.
 var DEBUT_MAX = 60;
-// ponytail: au-dela de 4 jours entre deux seances (week-end de trois jours compris), une seance manque.
-var TROU_JOURS = 4;
+// ponytail: une seance close va aussi jusqu'a sa fin si sa derniere barre tombe a moins de 4 h de la fin de la seance du graphe, cloture anticipee d'un jour ferie comprise (regle de pivots.js et confluence.js).
+var FIN_MAX = 240;
 
 var PERIODES = [['jour','Journalier (séance du graphe)'],['us','Séance US (RTH)'],['asie','Séance Asie'],['eu','Séance Europe'],['sem','Hebdomadaire (semaine ISO)'],['mois','Mensuel']];
 var STYLES = [['plein','Plein'],['tirets','Tirets'],['points','Pointillés'],['fins','Pointillés fins'],['mixte','Tiret-point']];
@@ -63,6 +68,7 @@ var EN = {
   'Calcul sur RTH seul (graphe ETH)':'Computed on RTH only (ETH chart)', 'Value Area %':'Value Area %',
   'Largeur au bord droit (% du graphe)':'Width at the right edge (% of chart)', 'Largeur sur la période (% de sa durée)':'Width on the period (% of its span)',
   'Largeur maximale (% du graphe)':'Maximum width (% of chart)', 'masqué':'hidden',
+  'partiel':'partial', 'séance manquante ou incomplète le':'missing or incomplete session on',
   'Ticks par rangée (0 = auto)':'Ticks per row (0 = auto)', 'Affichage du volume':'Volume display',
   'Acheteurs et vendeurs empilés':'Buyers and sellers stacked', 'Total, coloré par la Value Area':'Total, colored by the Value Area',
   'Couleur acheteurs':'Buyers color', 'Opacité acheteurs':'Buyers opacity', 'Couleur vendeurs':'Sellers color', 'Opacité vendeurs':'Sellers opacity',
@@ -190,7 +196,17 @@ function debut(n, lire, f){
   for(var i = 0; i < n; i++){ var b = lire(i); if(b && !b._trou && dans(f, +b.m)) return +b.m; }
   return null;
 }
-function jours(a, b){ return (Date.parse(b) - Date.parse(a)) / 864e5; }
+// Minutes entre le debut de la fenetre f (l'ouverture si null) et la minute m.
+// Une fenetre qui enjambe l'ouverture du graphe a commence dans la seance
+// precedente : Infinity si le marche y traitait, sinon depuis l'ouverture.
+function ecart(f, m, dur){ return !f ? m : m >= f[0] ? m - f[0] : f[0] >= dur ? m : Infinity; }
+// Jours ouvres strictement entre deux dates AAAA-MM-JJ.
+// ponytail: les feries sont ignores ; un seul jour ouvre sans seance passe pour un ferie, deux font un trou.
+function manquent(a, b){
+  var n = 0;
+  for(var d = Date.parse(a) + 864e5, f = Date.parse(b); d < f; d += 864e5) if(new Date(d).getUTCDay() % 6) n++;
+  return n;
+}
 
 // Seances du graphe, barre et minute de debut et de fin. Incremental : si le
 // graphe a seulement grandi, seules les nouvelles barres sont lues ; s'il a
@@ -240,19 +256,21 @@ function periodes(C, g, r, J){
   return P;
 }
 
-function vide(){ return {h:new Map(), sans:0, nb:0, deb:-1, fin:-1}; }
+function vide(){ return {h:new Map(), sans:0, nb:0, deb:-1, fin:-1, m0:null, m1:null, trou:false}; }
 
 // Volume par tick des barres de la seance s dans la fenetre f : cle = prix /
 // tick arrondi, valeur [bid, ask]. Une Map : des cles entieres vers 28 000
-// et eparses rendent un objet deux fois plus lent.
+// et eparses rendent un objet deux fois plus lent. m0, m1 : minutes de la
+// premiere et de la derniere barre ; trou : une barre de comblement.
 function histo(g, s, f){
   var H = vide(), h = H.h, t = g.tick || 0.25;
   for(var i = s.deb; i <= s.fin; i++){
     var b = g.barre(i);
-    if(!b || b._trou || !dans(f, +b.m)) continue;
+    if(!b || !dans(f, +b.m)) continue;
+    if(b._trou){ H.trou = true; continue; }
     H.nb++;
-    if(H.deb < 0) H.deb = i;
-    H.fin = i;
+    if(H.deb < 0){ H.deb = i; H.m0 = +b.m; }
+    H.fin = i; H.m1 = +b.m;
     var L = g.niveaux(i);
     if(!L.n){ H.sans++; continue; }
     for(var k = 0; k < L.n; k++){
@@ -284,37 +302,39 @@ function minutes(g){
   return MINUTES[f];
 }
 
-// Semaine ou mois p ouvert par la premiere seance du graphe, que le graphe ne
-// prend pas a son debut : {k, ok, H}, H le volume par tick des barres d'une
-// minute qui precedent la premiere barre du graphe. null si la periode n'est
-// pas concernee. ok faux, et la periode masquee, si ces barres ne remontent
-// pas au premier jour ouvre, ont un trou, ou tant que le fichier n'est pas lu.
+// Premiere periode p du graphe quand il ne la prend pas a son debut (graphe
+// en ticks) : {k, ok, H}, H le volume par tick des barres d'une minute du
+// fichier qui precedent la premiere barre du graphe, dans sa fenetre. null si
+// elle commence dans les donnees. ok faux, et la periode masquee, tant que le
+// fichier n'est pas lu ou si ces barres ne la couvrent pas : debut de la
+// periode absent, seance entamee en retard ou tronquee, plus d'un jour ouvre
+// sans seance, derniere barre plus d'une heure avant la premiere du graphe.
 // Un graphe en minutes est tire de ce fichier : rien a y ajouter.
 // ponytail: le fichier se lit en une image, 2 ms par seance environ (25 ms pour douze) ; l'etaler comme histoSeance si l'accroc se voit.
 function amorce(C, g, r, J, p){
-  var T = r.periode, s = J[0];
-  if((T !== 'sem' && T !== 'mois') || p.k0 !== 0 || !s.date) return null;
-  var f = fenetre(C, g, r, J, 0), f0 = f ? f[0] : 0, date0 = s.date, cleDe = T === 'sem' ? semaine : mois;
+  var T = r.periode, s = J[0], cal = T === 'sem' || T === 'mois';
+  if(p.k0 !== 0 || !s.date) return null;
+  var f = fenetre(C, g, r, J, 0), date0 = s.date, dur = DUREE[g.seance] || DUREE.eth, cleDe = T === 'sem' ? semaine : mois;
   var m0 = debut(s.fin - s.deb + 1, function(i){ return g.barre(s.deb + i); }, f);
-  if(m0 === null || (premierOuvre(T, date0) && m0 < f0 + DEBUT_MAX)) return null;
+  if(m0 === null || (ecart(f, m0, dur) < DEBUT_MAX && (!cal || premierOuvre(T, date0)))) return null;
   var M = typeof g.tf === 'number' ? null : minutes(g), k = [date0, m0, M ? M.pret : '-'].join('|');
   if(C.amo && C.amo.k === k) return C.amo.A;
-  var A = {k:k, ok:false, H:vide()}, h = A.H.h, t = g.tick || 0.25, cle = cleDe(date0);
-  var S = M && M.pret ? M.S : [], vu = false, trou = false, prec = null;
+  // La seance de la premiere barre ne vient du fichier que si le graphe ne la prend pas dans l'heure.
+  var A = {k:k, ok:false, H:vide()}, h = A.H.h, t = g.tick || 0.25, besoin = ecart(f, m0, dur) >= DEBUT_MAX;
+  var z = Math.min((f ? Math.min(f[1], 1440) : dur) - DEBUT_MAX, dur - FIN_MAX);
+  var S = M && M.pret ? M.S : [], ouvert = !cal, ok = true, vu = false, prec = null;
   for(var i = 0; i < S.length; i++){
-    var d = String(S[i].date || '').slice(0, 10), B = S[i].bars || [];
-    if(!B.length || d > date0) continue;
+    var d = String(S[i].date || '').slice(0, 10), B = S[i].bars || [], e0 = null, e1 = null;
+    if(!B.length || d > date0 || (!cal && d !== date0)) continue;
     // Une seance d'avant la periode : son debut est dans le fichier.
-    if(cleDe(d) !== cle){ A.ok = true; prec = d; continue; }
-    if(prec && jours(prec, d) > TROU_JOURS) trou = true;
-    if(!vu){
-      vu = true;
-      var mf = debut(B.length, function(j){ return B[j]; }, f);
-      A.ok = A.ok || (premierOuvre(T, d) && mf !== null && mf < f0 + DEBUT_MAX);
-    }
+    if(cal && cleDe(d) !== cleDe(date0)){ ouvert = true; prec = d; continue; }
+    if(prec && manquent(prec, d) > 1) ok = false;
+    if(!vu){ vu = true; ouvert = ouvert || premierOuvre(T, d); }
     for(var j = 0; j < B.length; j++){
       var b = B[j], lv = b.lv || [];
       if(b._trou || !dans(f, +b.m) || (d === date0 && +b.m + 1 > m0)) continue;
+      if(e0 === null) e0 = +b.m;
+      e1 = +b.m;
       A.H.nb++;
       if(!lv.length){ A.H.sans++; continue; }
       for(var q = 0; q < lv.length; q++){
@@ -326,11 +346,40 @@ function amorce(C, g, r, J, p){
         }
       }
     }
+    // Chaque seance entamee dans l'heure ; une veille jusqu'a sa fin, le jour meme jusqu'a l'heure qui precede la premiere barre du graphe.
+    if(d < date0 || besoin) ok = ok && e0 !== null && ecart(f, e0, dur) < DEBUT_MAX && (d < date0 ? e1 >= z : e1 + 1 >= m0 - DEBUT_MAX);
     prec = d;
   }
-  A.ok = A.ok && !trou && prec !== null && jours(prec, date0) <= TROU_JOURS;
+  A.ok = ouvert && ok && prec !== null && (prec === date0 || (!besoin && manquent(prec, date0) <= 1));
   C.amo = {k:k, A:A};
   return A;
+}
+
+// Ce qui manque a la periode p, Hs l'histogramme de chacune de ses seances
+// dans sa fenetre, A l'amorce du fichier minute : {partiel, incomplet}.
+// partiel : son debut n'est pas charge (date de sa premiere seance pour une
+// semaine ou un mois, true pour une seance), ou, pour une seance, elle est
+// tronquee ou a une barre de comblement ; incomplet : date de la premiere
+// seance d'une semaine ou d'un mois entamee en retard, tronquee, absente (TT
+// pose des barres de comblement a la date d'un jour manquant : aucune barre
+// reelle dans la fenetre), ou precedee de deux jours ouvres sans seance.
+// Entamee : premiere barre dans l'heure ; tronquee : fenetre close (la seance
+// continue apres elle, ou une autre la suit) dont la derniere barre tombe plus
+// d'une heure avant sa fin et plus de 4 h avant la fin de la seance.
+// ponytail: un trou au milieu d'une seance sans barre de comblement (ticks manquants) passe inapercu.
+function manque(C, g, r, J, p, Hs, A){
+  var cal = r.periode === 'sem' || r.periode === 'mois', dur = DUREE[g.seance] || DUREE.eth, D = {partiel:null, incomplet:null};
+  for(var k = p.k0; k <= p.k1; k++){
+    var s = J[k], H = Hs[k - p.k0], f = fenetre(C, g, r, J, k);
+    var entame = H.m0 !== null && ecart(f, H.m0, dur) < DEBUT_MAX;
+    if(k === p.k0) entame = (A && A.ok) || (entame && (!cal || premierOuvre(r.periode, s.date)));
+    else entame = entame && manquent(J[k - 1].date, s.date) <= 1;
+    var close = k < J.length - 1 || (f && s.m1 >= f[1]);
+    var fin = !close || (H.m1 !== null && H.m1 >= Math.min((f ? Math.min(f[1], 1440) : dur) - DEBUT_MAX, dur - FIN_MAX));
+    if(!entame && k === p.k0) D.partiel = cal ? s.date : true;
+    else if(!entame || !fin || H.trou){ if(cal) D.incomplet = D.incomplet || s.date; else D.partiel = true; }
+  }
+  return D;
 }
 
 function ajoute(A, B){
@@ -372,16 +421,15 @@ function zoneValeur(V, part){
 }
 
 // Profil d'une periode : ticks croissants, bid et ask par tick, POC et aire
-// de valeur en ticks ; null sans volume. `partiel` : date de la premiere
-// seance si la periode n'est pas chargee depuis son debut.
-function profil(S, p, r, J, partiel){
+// de valeur en ticks ; null sans volume. D : ce qui lui manque (manque).
+function profil(S, p, r, J, D){
   var T = Array.from(S.h.keys()).sort(function(a, b){ return a - b; }), n = T.length, k;
   if(!n) return null;
   var B = new Float64Array(n), A = new Float64Array(n), V = new Float64Array(n);
   for(k = 0; k < n; k++){ var e = S.h.get(T[k]); B[k] = e[0]; A[k] = e[1]; V[k] = e[0] + e[1]; }
   var Z = zoneValeur(V, r.vaPct / 100), P = r.periode, d = J[p.k0].date;
   return {ticks:T, bid:B, ask:A, total:Z.total, poc:T[Z.poc], vah:T[Z.vah], val:T[Z.val], deb:S.deb, fin:S.fin, sans:S.sans, nb:S.nb,
-          nom:NOM[P], cle:P === 'sem' ? semaine(d).slice(5) : P === 'mois' ? mois(d) : d, partiel:partiel};
+          nom:NOM[P], cle:P === 'sem' ? semaine(d).slice(5) : P === 'mois' ? mois(d) : d, partiel:D.partiel, incomplet:D.incomplet};
 }
 
 // Profil d'une periode close, calcule une fois ; undefined tant que ses
@@ -389,21 +437,22 @@ function profil(S, p, r, J, partiel){
 function fermee(C, g, r, J, p, t0){
   var A = amorce(C, g, r, J, p), id = p.k0 + ':' + p.k1 + (A ? '|' + A.k : '');
   if(id in C.R) return C.R[id];
-  var S = vide();
+  var S = vide(), Hs = [];
   for(var k = p.k0; k <= p.k1; k++){
     var H = histoSeance(C, g, r, J, k, t0);
     if(!H) return undefined;
-    ajoute(S, H);
+    ajoute(S, H); Hs.push(H);
   }
   if(A && A.ok) ajoute(S, A.H);
-  return (C.R[id] = profil(S, p, r, J, A && !A.ok ? J[0].date : null));
+  return (C.R[id] = profil(S, p, r, J, manque(C, g, r, J, p, Hs, A)));
 }
 
 // Profils de la periode en cours (la derniere) et des `hist` precedentes
 // visibles. Les seances closes se calculent une fois, au plus BUDGET_MS par
 // image (rien n'est dessine avant la fin) ; la seance ouverte se relit quand
-// la derniere barre bouge. Une periode precedente partielle ou a barres sans
-// niveaux est omise ; la periode en cours l'est au dessin, legende gardee.
+// la derniere barre bouge. Une periode precedente partielle, incomplete ou a
+// barres sans niveaux est omise ; la periode en cours l'est au dessin,
+// legende gardee.
 function calcul(C, g, r){
   var t0 = maintenant(), J = seances(ETAT, g, t0 + BUDGET_MS), n = g.n | 0;
   LUES = 0;
@@ -423,7 +472,7 @@ function calcul(C, g, r){
     if(J[p.k1].fin < g.premiere || J[p.k0].deb > g.derniere) continue;
     R = fermee(C, g, r, J, p, t0);
     if(R === undefined){ redessiner(); return null; }
-    if(R && !R.partiel && !R.sans) prec.push(R);
+    if(R && !R.partiel && !R.incomplet && !R.sans) prec.push(R);
   }
 
   p = P[P.length - 1];
@@ -435,17 +484,18 @@ function calcul(C, g, r){
       var cs = p.k0 + '|' + der + ka, S;
       if(C.somme.cle !== cs){
         S = vide();
+        var Hs = [];
         for(k = p.k0; k < der; k++){
           var H = histoSeance(C, g, r, J, k, t0);
           if(!H){ redessiner(); return null; }
-          ajoute(S, H);
+          ajoute(S, H); Hs.push(H);
         }
         if(A && A.ok) ajoute(S, A.H);
-        C.somme = {cle:cs, S:S};
+        C.somme = {cle:cs, S:S, Hs:Hs};
       }
       var O = histoSeance(C, g, r, J, der, t0, cleOuv);
       if(!O){ redessiner(); return null; }
-      C.cour = {cle:cle, R:profil(ajoute(ajoute(vide(), C.somme.S), O), p, r, J, A && !A.ok ? J[0].date : null)};
+      C.cour = {cle:cle, R:profil(ajoute(ajoute(vide(), C.somme.S), O), p, r, J, manque(C, g, r, J, p, C.somme.Hs.concat([O]), A))};
     }
     R = C.cour.R;
   }
@@ -510,7 +560,7 @@ function dessine(C, rang, g, r){
   var yTxt = F.haut + (12 + 13 * rang) * e;
   if(X.raison) g.texte(F.gauche + 8 * e, yTxt, tr(X.raison), {couleur:'#8a929c', taille:10});
   // Rien de dessine sur une periode en cours incomplete : seule la legende dit pourquoi.
-  var masque = X.cour && (X.cour.partiel || X.cour.sans);
+  var masque = X.cour && (X.cour.partiel || X.cour.incomplet || X.cour.sans);
   var tous = X.cour && !masque ? X.prec.concat([X.cour]) : X.prec;
   if(masque) legende(g, r, X.cour, yTxt);
   if(!tous.length) return;
@@ -562,7 +612,8 @@ function dessine(C, rang, g, r){
 // Legende de la periode en cours, et pourquoi elle est masquee.
 function legende(g, r, R, y){
   var e = g.echelle || 1, titre = tr(R.nom) + (R.cle ? ' ' + R.cle : ''), pq = [];
-  if(R.partiel) pq.push(tr('partiel, depuis le') + ' ' + R.partiel);
+  if(R.partiel) pq.push(R.partiel === true ? tr('partiel') : tr('partiel, depuis le') + ' ' + R.partiel);
+  if(R.incomplet) pq.push(tr('séance manquante ou incomplète le') + ' ' + R.incomplet);
   if(R.sans) pq.push(Math.round(100 * R.sans / R.nb) + ' % ' + tr('des barres sans niveaux'));
   if(pq.length) titre += ' · ' + tr('masqué') + ' : ' + pq.join(', ');
   g.texte(g.cadre.droite - 4 * e, y, titre, {couleur:'#8a929c', taille:10, align:'right'});
