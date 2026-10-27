@@ -10,11 +10,17 @@
 // Une barre appartient a la session qui contient son milieu, comme sur les
 // bandes de TT. La session de la derniere barre est en cours : elle ne passe
 // en session close qu'a l'arrivee d'une barre de la session suivante.
+//
+// Rien n'est tire de donnees manquantes : une session prise en cours, coupee
+// avant sa fin, trouee ou suivie d'une occurrence absente (seance coupee ou
+// manquante, jour ouvre sans barre) n'est pas tracee.
 (function(){
 
 var ET = 'America/New_York';
 // ponytail: minute ET de l'ouverture du graphe, 18:00 en ETH et 09:30 en RTH (ES, NQ).
 var OUVERTURE = {eth:1080, rth:570};
+// ponytail: duree de la seance du graphe en minutes, 23 h en ETH et 6 h 30 en RTH (ES, NQ) ; au-dela, la pause.
+var DUREE = {eth:1380, rth:390};
 // Memes defauts que hfq-sessions-monde.js, que le footprint ne charge pas.
 var DEFAUTS = [
   {id:'asie', nom:'Tokyo',    h:18, m:0,  tz:ET,              col:'#4bd48e'},
@@ -67,6 +73,33 @@ try{
 }catch(_){}
 
 function aujourdhui(){ return new Date().toISOString().slice(0, 10); }
+// Jours de fermeture complete du CME (Jour de l'An, Vendredi saint, Noel,
+// reports compris), lus dans le calendrier de TT (HFQSessions.feriesUS) ; les
+// seances ecourtees restent ouvrees. Sans ce calendrier, tout jour de semaine l'est.
+var FERMES = {};
+function ouvre(ms){
+  var d = new Date(ms), an = d.getUTCFullYear();
+  if(!(d.getUTCDay() % 6)) return false;
+  if(!FERMES[an]){
+    FERMES[an] = {};
+    try{ HFQSessions.feriesUS(an).forEach(function(f){ if(f.type === 'ferme') FERMES[an][f.date] = 1; }); }catch(_){}
+  }
+  return !FERMES[an][d.toISOString().slice(0, 10)];
+}
+// Jours ouvres strictement entre deux dates de seance : une seance manque entre elles.
+function ouvresEntre(a, b){
+  var d = Date.parse(String(a).slice(0, 10)), f = Date.parse(String(b).slice(0, 10)), n = 0;
+  if(!(d < f)) return 0;
+  for(d += 864e5; d < f; d += 864e5) if(ouvre(d)) n++;
+  return n;
+}
+// Trou de donnees, en minutes : plus de 10 minutes sans barre au-dela d'une
+// barre, le seuil des marques « sans donnee » de TT (HFQLiveSeed.trouEntre).
+// ponytail: graphes en ticks, volume ou range, sans duree de barre : une heure, qu'une barre lente d'Asie peut approcher.
+function tolere(g){ return typeof g.tf === 'number' ? Math.max(1, g.tf) + 10 : 60; }
+// Minute de seance sans la pause : la queue d'une session ouverte la veille
+// reprend ou la seance du graphe s'arretait.
+function minute(x, dur){ return x < 1440 ? Math.min(x, dur) : x - 1440 + dur; }
 // Cle d'une barre, pour reconnaitre la derniere lue a son index.
 function cleBarre(b){ return b ? (b._date || '') + ':' + b.m : ''; }
 function maintenant(){ return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now(); }
@@ -115,6 +148,12 @@ function fenetres(date, ouv){
 
 function niveau(s){ return {s:s, p:s > 0 ? -Infinity : Infinity, i:-1, m:-1, c:-1}; }
 
+// Session tracee : chargee en entier (`ok`) et derniere de son id, aucune
+// occurrence manquante depuis. `o` numerote les sessions dans l'ordre du temps
+// (jour ouvre fois nombre de sessions plus rang), la suivante du meme id porte
+// o + K : la depasser sans l'avoir vue fermer, c'est qu'elle manque.
+function montre(S, o){ return !!o && o.ok && !(S.cour && o.o + S.K < S.cour.o); }
+
 // Premiere meche qui touche le niveau et premiere cloture au-dela (`m` et
 // `c`, index de barre). La cloture de la barre en cours n'est pas acquise.
 function touche(S, o, v, b, i, vive){
@@ -126,24 +165,36 @@ function touche(S, o, v, b, i, vive){
 // puis etend la session en cours. Une session se reconnait a son id et a la
 // seance du graphe ou elle s'ouvre (`j`, moins un dans la queue d'une session
 // ouverte la veille). Relire la derniere barre, qui grossit encore, ne
-// change rien de ce qui est deja note.
-function lit(S, b, i, j, vive, ouv, demi){
+// change rien de ce qui est deja note. Une session est complete (`ok`) si sa
+// premiere barre suit son debut, sa derniere precede sa fin et deux barres ne
+// s'ecartent pas de plus de P.tol minutes, sans barre de comblement.
+function lit(S, b, i, j, vive, P){
   var date = b._date ? String(b._date).slice(0, 10) : aujourdhui();
-  var F = S.F[date] || (S.F[date] = fenetres(date, ouv));
-  var m = +b.m + demi, s = null, q = 0;
+  var F = S.F[date] || (S.F[date] = fenetres(date, P.ouv).sort(function(x, y){ return x.a - y.a; }));
+  var m = +b.m + P.demi, s = null, q = 0, rg = -1;
   for(var k = 0; k < F.length && !s; k++){
     if(m >= F[k].a && m < F[k].b) s = F[k];
     else if(m + 1440 >= F[k].a && m + 1440 < F[k].b){ s = F[k]; q = 1; }
+    rg = k;
   }
   if(!s) return;
   var cle = s.id + ':' + (j - q);
   if(!S.cour || S.cour.cle !== cle){
-    if(S.cour && S.cour.H.i >= 0) S.D[S.cour.id] = S.cour;
-    S.cour = {id:s.id, cle:cle, nom:s.nom, col:s.col, H:niveau(1), L:niveau(-1)};
+    if(S.cour && S.cour.H.i >= 0){
+      if(S.cour.b - S.cour.t > P.tol) S.cour.ok = false;
+      S.D[S.cour.id] = S.cour;
+    }
+    S.cour = {id:s.id, cle:cle, nom:s.nom, col:s.col, H:niveau(1), L:niveau(-1),
+      o:(j - q) * F.length + rg, a:minute(s.a, P.dur), b:minute(s.b, P.dur), t:-1, ok:true};
+    S.K = F.length;
   }
-  if(b._trou) return;
-  for(var id in S.D){ touche(S, S.D[id], S.D[id].H, b, i, vive); touche(S, S.D[id], S.D[id].L, b, i, vive); }
   var c = S.cour;
+  if(b._trou){ c.ok = false; return; }
+  for(var id in S.D){ touche(S, S.D[id], S.D[id].H, b, i, vive); touche(S, S.D[id], S.D[id].L, b, i, vive); }
+  // Les barres tombent avant la pause : seule la queue d'une session ouverte la veille passe par minute().
+  var t = q ? m + P.dur : m;
+  if(t - (c.t < 0 ? c.a : c.t) > P.tol) c.ok = false;
+  c.t = t;
   if(b.h > c.H.p){ c.H.p = b.h; c.H.i = i; }
   if(b.l < c.L.p){ c.L.p = b.l; c.L.i = i; }
 }
@@ -153,20 +204,21 @@ function lit(S, b, i, j, vive, ouv, demi){
 // une autre serie ou une derniere barre lue qui n'est plus a son index (barres
 // inserees plus tot, comme l'historique en ticks qui se remplit) repart de
 // zero, sans notifier l'historique, dont la lecture s'etale sur plusieurs
-// images au-dela de BUDGET_MS.
+// images au-dela de BUDGET_MS. `j` compte les jours ouvres : un jour sans
+// seance en saute un.
 function calcul(g, r){
   var S = ETAT, n = g.n | 0, b0 = n ? g.barre(0) : null, b;
   var sig = [g.sym, g.tf, g.seance, g.tick, cleBarre(b0)].join('|');
   if(sig !== S.sig || n < S.vu || (S.prev && cleBarre(g.barre(S.ip)) !== cleBarre(S.prev))){ S.sig = sig; S.n = 0; S.j = 0; S.prev = null; S.ip = -1; S.F = {}; S.cour = null; S.D = {}; S.pret = false; S.neufs = []; }
   S.vu = n;
-  var ouv = OUVERTURE[g.seance] != null ? OUVERTURE[g.seance] : 1080;
   // Milieu de la barre sur les unites de temps en minutes, comme les bandes de TT.
-  var demi = typeof g.tf === 'number' ? g.tf / 2 : 0;
+  var P = {ouv:OUVERTURE[g.seance] != null ? OUVERTURE[g.seance] : 1080, demi:typeof g.tf === 'number' ? g.tf / 2 : 0,
+    dur:DUREE[g.seance] || 1380, tol:tolere(g)};
   for(var i = S.n, t0 = maintenant(); i < n; i++){
     if(!(i & 255) && i > S.n && i < n - 1 && maintenant() - t0 > BUDGET_MS){ S.n = i; redessiner(); return S; }
     if(!(b = g.barre(i))) continue;
-    var j = S.j + (S.prev && (b._date != null ? b._date !== S.prev._date : +b.m < +S.prev.m) ? 1 : 0);
-    lit(S, b, i, j, i === n - 1, ouv, demi);
+    var j = S.j + (!S.prev ? 0 : b._date != null ? (b._date !== S.prev._date ? 1 + ouvresEntre(S.prev._date, b._date) : 0) : +b.m < +S.prev.m ? 1 : 0);
+    lit(S, b, i, j, i === n - 1, P);
     S.j = j; S.prev = b; S.ip = i;
   }
   S.n = Math.max(S.n, n - 1); S.pret = true;
@@ -188,7 +240,7 @@ function notifier(S, g, r){
   var N = S.neufs, d = (String(g.tick).split('.')[1] || '').length;
   S.neufs = [];
   N.forEach(function(a){
-    if(r.alerte !== a.type || !r[a.o.id] || a.i < (g.n | 0) - 2) return;
+    if(r.alerte !== a.type || !r[a.o.id] || !montre(S, a.o) || a.i < (g.n | 0) - 2) return;
     pousser((g.sym ? g.sym + ' · ' : '') + tr(a.o.nom) + (a.v.s > 0 ? ' H' : ' L'),
       tr(a.type === 'meche' ? 'Niveau touché' : 'Clôture au-delà du niveau') + ' : ' + a.v.p.toFixed(d));
   });
@@ -214,7 +266,7 @@ HFQExt.etude({
     {k:'etiqPos', label:'Position des étiquettes', type:'select', defaut:'gauche', options:[['gauche','À gauche (début du trait)'],['droite','À droite (fin du trait)']]}
   ],
   calcul:calcul,
-  outils:{fenetres:fenetres},
+  outils:{fenetres:fenetres, montre:montre},
   dessine:function(g, r){
     var S = calcul(g, r), F = g.cadre, e = g.echelle || 1;
     if(!S.pret) return;
@@ -223,7 +275,7 @@ HFQExt.etude({
     if(fin < deb) return;
     for(var id in S.D){
       var o = S.D[id];
-      if(!r[id]) continue;
+      if(!r[id] || !montre(S, o)) continue;
       [o.H, o.L].forEach(function(v){
         var t = r.jusqua === 'bord' ? -1 : r.jusqua === 'cloture' ? v.c : v.m;
         if(v.i > fin || (t >= 0 && t < deb)) return;

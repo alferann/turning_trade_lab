@@ -7,6 +7,8 @@ import path from 'node:path';
 
 const RACINE = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const SRC = fs.readFileSync(path.join(RACINE, 'extensions/vwap_pro.js'), 'utf8');
+// TT's market calendar (hfq-sessions.js): full CME closures (New Year, Good Friday, Christmas) are no missing day.
+const HFQSessions = (() => { const c = {}; vm.runInContext(fs.readFileSync(path.join(process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Terminal/payload', 'hfq-sessions.js'), 'utf8'), vm.createContext(c)); return c.HFQSessions; })();
 const DB = path.join(process.env.TT_DATA || path.join(process.env.HOME, '.local/share/TurningTrade'), '_footprint_db_rec_ES.json');
 
 const db = JSON.parse(fs.readFileSync(DB, 'utf8'));
@@ -19,7 +21,7 @@ const J = e => !e || !e.length ? { n: 0, prix: () => 0, bid: () => 0, ask: () =>
 // No HFQSessionsMonde in the context: the study falls back to its built-in session defaults. fetch serves the
 // one-minute files of FICHIERS only when servir() is awaited, like a request in flight.
 const defs = [], FICHIERS = {}, appels = [], attente = [];
-vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console,
+vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console, HFQSessions,
   HFQSymGuard: { histFile: (t, s) => t + '_' + s + '.json' },
   fetch(f) { appels.push(f); return new Promise(ok => attente.push(() => ok({ json: () => FICHIERS[f] }))); } }));
 const servir = async () => { while (attente.length) attente.shift()(); await new Promise(r => setImmediate(r)); };
@@ -92,12 +94,14 @@ const proche = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ' : ' + a 
   assert.ok(Number.isNaN(C.vwap[BP.findIndex((b, i) => i >= iPlein && b.m === 1320)]), 'fin auto à 16:00 ET');
 }
 
-// 5. Weekly and monthly. Up to eight sessions that start within their first hour are relabelled on the business days
-// from Monday 2 November 2026, the first business day of its month, so the bench does not depend on the days the
-// archive holds: week 45 (2 to 6 November), then week 46.
+// 5. Weekly and monthly. Up to eight whole sessions (first bar within the hour, last one within 4 h of the close: a
+// cut one, like 22/10 stopping at 07:37 ET, masks the rest of its week) are relabelled on the business days from
+// Monday 2 November 2026, the first business day of its month, so the bench does not depend on the days the archive
+// holds: week 45 (2 to 6 November), then week 46.
 const ouvres = [];
 for (const d = new Date(Date.UTC(2026, 10, 2)); ouvres.length < 8; d.setUTCDate(d.getUTCDate() + 1)) if (d.getUTCDay() % 6) ouvres.push(d.toISOString().slice(0, 10));
-const R = db.sessions.filter(s => s.bars.length && s.bars[0].m < 60).slice(0, 8).map((s, k) => ({ date: ouvres[k], bars: s.bars }));
+const entiere = s => s.bars.length && s.bars[0].m < 60 && s.bars.at(-1).m >= 1140;
+const R = db.sessions.filter(entiere).slice(0, 8).map((s, k) => ({ date: ouvres[k], bars: s.bars }));
 assert.ok(R.length >= 4, 'au moins quatre séances complètes dans l\'archive');
 const aplat = S => S.flatMap(s => s.bars.map(b => Object.assign({ _date: s.date, v: b.lv.reduce((a, l) => a + l[1] + l[2], 0) }, b)));
 const cleP = { sem: d => A.outils.semaine(d), mois: d => d.slice(0, 7) };
@@ -159,6 +163,119 @@ const sem45 = b => A.outils.semaine(b._date) === A.outils.semaine(R[2].date);
   const W = A.calcul(T3, avec({ anc: 'sem' }));
   assert.ok(BT.every((b, i) => !sem45(b) || Number.isNaN(W.vwap[i])), 'fichier sans le 2 : semaine 45 masquée');
   assert.ok(Array.from(A.calcul(T4, avec({ anc: 'mois' })).vwap.subarray(0, R[2].bars.length)).every(Number.isNaN), 'trou du 2 au 10 : mois masqué');
+}
+
+// 5f. Nothing displayed on missing data, every anchor. Whole sessions on the business days from Monday 2 November
+// (London and New York both on winter time: Asia m ∈ [0, 540), Europe [540, 930), US [930, 1320)).
+const RS = ouvres.slice(0, 6).map((date, k) => ({ date, bars: R[k % R.length].bars }));
+const fenDe = anc => { const [a, z] = A.outils.bornesET(anc, '2026-11-04', defaut).map(v => (v - 1080 + 1440) % 1440); return b => b.m >= a && b.m < (z <= a ? z + 1440 : z); };
+const FEN = { us: fenDe('us'), eu: fenDe('eu'), asie: fenDe('asie') };
+assert.deepEqual(['us', 'eu', 'asie'].map(anc => A.outils.bornesET(anc, '2026-11-04', defaut)[0]), [570, 180, 1080], 'heures d\'hiver');
+const coupe = (s, f) => ({ date: s.date, bars: s.bars.filter(f) });
+const trous = date => Array.from({ length: 8 }, () => ({ _trou: true, _date: date, m: 0, o: 7000, h: 7000, l: 7000, c: 7000, lv: [], v: 0 }));
+// Each bar is drawn exactly when f says so.
+const traces = (C, B, f, msg) => { const k = B.findIndex((b, i) => Number.isFinite(C.vwap[i]) !== !!f(b)); assert.equal(k, -1, msg + (k < 0 ? '' : ' : barre ' + k + ', ' + B[k]._date + ' m ' + B[k].m)); };
+const fin = (C, B, f) => C.vwap[B.findLastIndex(f)];
+{
+  // Minute chart joined at 05:40 ET on Monday 2 (m 700, Europe started at m 540): that day's session and its Europe
+  // are masked, its US session, which opens later, is drawn whole; the next days are drawn. No file is read.
+  const n0 = appels.length, L = aplat([coupe(RS[0], b => b.m >= 700), RS[1], RS[2]]);
+  traces(A.calcul(g(L), defaut), L, b => b._date !== '2026-11-02', 'minutes prises à 05:40 : séance masquée');
+  traces(A.calcul(g(L), avec({ anc: 'eu' })), L, b => FEN.eu(b) && b._date !== '2026-11-02', 'minutes prises à 05:40 : Europe masquée');
+  const U = A.calcul(g(L), avec({ anc: 'us' }));
+  traces(U, L, FEN.us, 'minutes prises à 05:40 : RTH entière');
+  proche(fin(U, L, b => b._date === '2026-11-02' && FEN.us(b)), brute(RS[0].bars.filter(FEN.us)).vwap, 'RTH du 2 entière');
+  assert.equal(appels.length, n0, 'graphe en minutes : aucun fichier lu');
+
+  // A session joined late further on (a partial day): that session masked, the week masked from it on, RTH drawn.
+  const M = aplat([RS[0], coupe(RS[1], b => b.m >= 700), RS[2]]);
+  traces(A.calcul(g(M), defaut), M, b => b._date !== '2026-11-03', 'séance du 3 entamée à 05:40 : masquée');
+  traces(A.calcul(g(M), avec({ anc: 'sem' })), M, b => b._date === '2026-11-02', 'semaine masquée depuis le 3');
+  traces(A.calcul(g(M), avec({ anc: 'us' })), M, FEN.us, 'RTH du 3 entière');
+
+  // Footprint, without dates: same masking, no file to complete it from.
+  const sans = L.map(b => { const c = Object.assign({}, b); delete c._date; return c; }), k1 = L.findIndex(b => b._date === '2026-11-03');
+  const P = A.calcul(g(sans), defaut);
+  assert.ok(sans.every((b, i) => Number.isFinite(P.vwap[i]) === (i >= k1)), 'footprint pris à 05:40 : séance masquée');
+  assert.equal(appels.length, n0, 'footprint : aucun fichier lu');
+
+  // A window straddling the chart's open: 16:00 → 18:30 ET is masked after the open, its first hour being in the
+  // previous session; 17:00 → 18:30 starts in the maintenance break, so the open starts it.
+  const O = aplat(RS.slice(0, 2));
+  traces(A.calcul(g(O), avec({ anc: 'us', deb: '960', fin: '1110' })), O, b => b.m >= 1320, '16:00 → 18:30 : masquée après l\'ouverture');
+  traces(A.calcul(g(O), avec({ anc: 'us', deb: '1020', fin: '1110' })), O, b => b.m < 30, '17:00 → 18:30 : tracée depuis l\'ouverture');
+}
+
+// 5g. Tick chart joined at 05:40 ET on Wednesday 4: its session and its Europe are completed from the one-minute
+// file, equal to the minute chart that holds them; masked if the file starts that session late, stops more than an
+// hour before the first tick bar, or lacks the day.
+{
+  const BR6 = aplat(RS), k = BR6.findIndex(b => b._date === '2026-11-04' && b.m >= 700), T = BR6.slice(k);
+  const fichier = (sym, S) => { FICHIERS['_footprint_eth_' + sym + '.json'] = { sessions: S }; return ticks(T, sym); };
+  const G = { ok: fichier('S1', RS), tard: fichier('S2', RS.map(s => s.date === '2026-11-04' ? coupe(s, b => b.m >= 300) : s)),
+    court: fichier('S3', RS.map(s => s.date === '2026-11-04' ? coupe(s, b => b.m < 500) : s)), sans: fichier('S4', RS.filter(s => s.date !== '2026-11-04')) };
+  const r = { jour: defaut, eu: avec({ anc: 'eu' }), us: avec({ anc: 'us' }) };
+  for (const x of Object.values(G)) for (const rr of Object.values(r)) A.calcul(x, rr);
+  assert.ok(Number.isNaN(A.calcul(G.ok, defaut).vwap[0]), 'masqué tant que le fichier n\'est pas lu');
+  await servir();
+  const vu = (x, rr) => Array.from(A.calcul(x, rr).vwap.subarray(0, T.length));
+  const meme = (a, b) => a.every((v, i) => Number.isNaN(v) ? Number.isNaN(b[i]) : Math.abs(v - b[i]) < 1e-6);
+  for (const [nom, rr] of Object.entries(r)) {
+    const ref = Array.from(defs[1].calcul(g(BR6), rr).vwap.subarray(k, BR6.length));
+    assert.ok(meme(vu(G.ok, rr), ref), nom + ' : ticks complétés = minutes entières');
+  }
+  const du4 = b => b._date === '2026-11-04';
+  traces(A.calcul(G.tard, defaut), T, b => !du4(b), 'fichier qui prend le 4 à 23:00 : séance masquée');
+  assert.ok(meme(vu(G.tard, r.eu), Array.from(defs[1].calcul(g(BR6), r.eu).vwap.subarray(k, BR6.length))), 'fichier qui prend le 4 à 23:00 : Europe complétée');
+  for (const [nom, x] of [['court', G.court], ['sans', G.sans]]) {
+    traces(A.calcul(x, defaut), T, b => !du4(b), nom + ' : séance masquée');
+    traces(A.calcul(x, r.eu), T, b => FEN.eu(b) && !du4(b), nom + ' : Europe masquée');
+  }
+  traces(A.calcul(G.sans, r.us), T, FEN.us, 'RTH du 4 entière dans le graphe');
+}
+
+// 5h. Week completed from the file: every session it brings must be whole and none may be missing. Tick chart from
+// Wednesday 4: masked if the file cuts Tuesday 3 at 07:37 ET or starts it at 23:00; joined at 05:40 that day, masked
+// if the file lacks Wednesday; from Friday 6, masked if Tuesday and Wednesday are both missing, or Wednesday alone
+// (a full CME closure would be in TT's calendar).
+{
+  const W = avec({ anc: 'sem' }), mer = aplat(RS.slice(2, 5)), ven = aplat([RS[4]]), mer540 = mer.filter(b => b._date !== '2026-11-04' || b.m >= 700);
+  const cas = [['coupé', mer, RS.map(s => s.date === '2026-11-03' ? coupe(s, b => b.m < 818) : s), false],
+    ['tard', mer, RS.map(s => s.date === '2026-11-03' ? coupe(s, b => b.m >= 300) : s), false],
+    ['sans le mercredi', mer540, RS.filter(s => s.date !== '2026-11-04'), false], ['entier', mer540, RS, true],
+    ['deux jours', ven, [RS[0], RS[3]], false], ['un jour', ven, [RS[0], RS[1], RS[3]], false]];
+  const G = cas.map(([nom, B, S], k) => { FICHIERS['_footprint_eth_W' + k + '.json'] = { sessions: S }; return ticks(B, 'W' + k); });
+  G.forEach(x => A.calcul(x, W)); await servir();
+  cas.forEach(([nom, B, , ok], k) => traces(A.calcul(G[k], W), B, () => ok, 'fichier ' + nom + ' : semaine ' + (ok ? 'complétée' : 'masquée')));
+}
+
+// 5i. Inside the chart: a session cut at 07:37 ET or a missing day (TT's filler bars) masks the week from there on,
+// the next week is drawn; each session keeps its own VWAP, exact up to its last bar. Two weekdays without a session
+// mask the week too; a lone one passes for a holiday.
+{
+  const W = avec({ anc: 'sem' }), apres = b => b._date >= '2026-11-09';
+  const C = aplat([RS[0], coupe(RS[1], b => b.m < 818), RS[2], RS[3], RS[4], RS[5]]);
+  traces(A.calcul(g(C), W), C, b => b._date <= '2026-11-03' || apres(b), 'séance coupée : semaine masquée ensuite');
+  const J = A.calcul(g(C), defaut);
+  traces(J, C, () => true, 'séance coupée : chaque séance tracée');
+  proche(fin(J, C, b => b._date === '2026-11-03'), brute(RS[1].bars.filter(b => b.m < 818)).vwap, 'séance coupée exacte jusqu\'à sa fin');
+  traces(A.calcul(g(C), avec({ anc: 'eu' })), C, FEN.eu, 'Europe du 3 tracée jusqu\'à la coupure');
+  const T = [...aplat([RS[0]]), ...trous('2026-11-03'), ...aplat(RS.slice(2))];
+  traces(A.calcul(g(T), W), T, b => b._date === '2026-11-02' || apres(b), 'jour manquant : semaine masquée depuis le trou');
+  traces(A.calcul(g(T), defaut), T, b => !b._trou, 'jour manquant : les autres séances tracées');
+  const D = aplat([RS[0], RS[3]]), U = aplat([RS[0], RS[2]]);
+  traces(A.calcul(g(D), W), D, b => b._date === '2026-11-02', 'mardi et mercredi sans séance : semaine masquée');
+  traces(A.calcul(g(U), W), U, b => b._date === '2026-11-02', 'mardi sans séance : semaine masquée ensuite');
+  // A full CME closure is no missing day: Good Friday 2026-04-03 (TT's calendar) inside the week and the month.
+  const GF = aplat(['2026-03-30', '2026-03-31', '2026-04-01', '2026-04-02', '2026-04-06'].map((date, k) => ({ date, bars: RS[k % RS.length].bars })));
+  traces(A.calcul(g(GF), avec({ anc: 'mois' })), GF, b => b._date >= '2026-04-01', 'Vendredi saint : avril tracé, mars partiel masqué');
+  traces(A.calcul(g(GF.filter(b => b._date >= '2026-03-30' && b._date <= '2026-04-02')), W), GF.filter(b => b._date <= '2026-04-02'), () => true, 'semaine du Vendredi saint tracée');
+  // A holiday early close at 13:15 ET (last bar m 1154) is a whole session: the week goes on, in the chart as from the file.
+  const H = aplat([RS[0], coupe(RS[1], b => b.m < 1155), RS[2]]);
+  traces(A.calcul(g(H), W), H, () => true, 'clôture anticipée à 13:15 : semaine tracée');
+  FICHIERS['_footprint_eth_H1.json'] = { sessions: [RS[0], coupe(RS[1], b => b.m < 1155)] };
+  const TH = ticks(aplat([RS[2]]), 'H1'); A.calcul(TH, W); await servir();
+  traces(A.calcul(TH, W), aplat([RS[2]]), () => true, 'clôture anticipée dans le fichier : semaine complétée');
 }
 
 // 6. Incremental cache: one more bar extends the sums instead of recomputing, same result as from scratch.

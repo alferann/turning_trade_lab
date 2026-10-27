@@ -7,9 +7,10 @@
 //
 // Les periodes se lisent sur la date de seance des barres : le footprint ne
 // datant pas les siennes, il n'y a la que les pivots journaliers. Une semaine
-// ou un mois precedent qui n'est pas charge en entier ne donne pas de pivots,
-// ni une veille qui ne couvre pas sa seance (historique en ticks encore en
-// cours de chargement, debut d'historique en pleine seance).
+// ou un mois precedent qui n'est pas charge en entier (chaque jour ouvre, du
+// premier au dernier) ne donne pas de pivots, ni une veille qui ne couvre pas
+// sa seance (historique en ticks encore en cours de chargement, debut
+// d'historique en pleine seance) ou qui n'est pas le jour ouvre d'avant.
 (function(){
 
 // ponytail: minutes de seance de RTH (09:30 a 16:00 ET) sur un graphe ETH ouvert a 18:00 ET (ES, NQ).
@@ -60,15 +61,42 @@ function semaine(cle){
   return an + '-' + (num < 10 ? '0' : '') + num;
 }
 
-// Vrai si la date est le premier jour ouvre de sa semaine (lundi) ou de son mois.
-// ponytail: les feries sont ignores ; une periode ouverte par un ferie passe pour incomplete, donc masquee.
-function premierOuvre(T, date){
-  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(date);
-  if(!m) return false;
-  var jour = function(k){ return new Date(Date.UTC(+m[1], +m[2] - 1, k)).getUTCDay(); };
-  if(T === 'sem') return jour(+m[3]) === 1;
-  for(var k = 1; k < +m[3]; k++) if(jour(k) % 6) return false;
-  return true;
+// Date AAAA-MM-JJ en millisecondes UTC, null si la cle n'est pas une date.
+function jour(cle){
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(cle);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null;
+}
+
+// Jours de fermeture complete du CME (Jour de l'An, Vendredi saint, Noel,
+// reports compris), lus dans le calendrier de TT (HFQSessions.feriesUS) ; les
+// seances ecourtees restent ouvrees. Sans ce calendrier, tout jour de semaine l'est.
+var FERMES = {};
+function ouvre(ms){
+  var d = new Date(ms), an = d.getUTCFullYear();
+  if(!(d.getUTCDay() % 6)) return false;
+  if(!FERMES[an]){
+    FERMES[an] = {};
+    try{ HFQSessions.feriesUS(an).forEach(function(f){ if(f.type === 'ferme') FERMES[an][f.date] = 1; }); }catch(_){}
+  }
+  return !FERMES[an][d.toISOString().slice(0, 10)];
+}
+
+// Jours ouvres strictement entre deux dates : une seance manque entre elles.
+function ouvresEntre(a, b){
+  var d = jour(a), f = jour(b), n = 0;
+  if(d === null || f === null) return 0;
+  for(d += 864e5; d < f; d += 864e5) if(ouvre(d)) n++;
+  return n;
+}
+
+// Jours ouvres de la semaine ou du mois d'une date : une periode close en
+// compte autant de seances si elle est chargee de son premier jour a son dernier.
+function ouvres(T, date){
+  var t = jour(date), x = new Date(t), d, fin, n = 0;
+  if(T === 'sem'){ d = t - ((x.getUTCDay() + 6) % 7) * 864e5; fin = d + 5 * 864e5; }
+  else { d = Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), 1); fin = Date.UTC(x.getUTCFullYear(), x.getUTCMonth() + 1, 1); }
+  for(; d < fin; d += 864e5) if(ouvre(d)) n++;
+  return n;
 }
 
 // Niveaux d'une periode a partir du haut, du bas, de la cloture et de l'ouverture de la precedente.
@@ -99,7 +127,7 @@ function ajoute(p, b, i, rth){
   if(b.l < p.L) p.L = b.l;
 }
 
-function periode(cle, debut, deb){ return {cle:cle, debut:debut, deb:deb, fin:deb, H:-Infinity, L:Infinity, O:null, C:null, m0:null, m1:null, complet:true, niv:null}; }
+function periode(cle, debut, deb, date){ return {cle:cle, debut:debut, date:date || debut, deb:deb, fin:deb, nb:0, H:-Infinity, L:Infinity, O:null, C:null, m0:null, m1:null, complet:true, niv:null}; }
 
 // Vrai si les barres comptees de la seance couvrent la fenetre f [debut, fin) en minutes.
 function complete(p, f){ return p.O !== null && p.m0 <= f[0] + MARGE[0] && p.m1 >= f[1] - MARGE[1]; }
@@ -122,7 +150,10 @@ function seances(S, g, rth){
     if(!b) continue;
     if(!prev || (b._date != null ? b._date !== prev._date : +b.m < +prev.m)){
       if(prev) sess++;
-      J.push(periode('j' + sess, b._date ? String(b._date).slice(0, 10) : '', i));
+      // Date de seance : `_date` des bougies, sinon `_sd`, que le footprint pose
+      // sur ses barres sans les dater ; elle ne sert qu'a voir une veille manquante.
+      var date = String(b._date || b._sd || '').slice(0, 10);
+      J.push(periode('j' + sess, b._date ? date : '', i, date));
     }
     ajoute(J[J.length - 1], b, i, rth);
     prev = b;
@@ -139,6 +170,7 @@ function regroupe(J, cleDe){
     if(!c) continue;
     if(!p || p.cle !== c) out.push(p = periode(c, s.debut, s.deb));
     p.fin = s.fin;
+    p.nb++;
     if(!s.complet) p.complet = false;
     if(s.O === null) continue;
     if(p.O === null) p.O = s.O;
@@ -160,11 +192,11 @@ function calcul(g, r){
   for(var j = 0; j < J.length; j++) J[j].complet = complete(J[j], f);
   var P = {jour:J, sem:regroupe(J, semaine), mois:regroupe(J, function(d){ return d.slice(0, 7); })};
   // Une periode precedente incomplete ne donne pas de pivots : seance qui ne
-  // couvre pas sa fenetre, semaine ou mois qui en contient une, ou qui ne
-  // s'ouvre pas a son premier jour ouvre.
+  // couvre pas sa fenetre ou qui n'est pas le jour ouvre d'avant, semaine ou
+  // mois qui contient une seance incomplete ou qui n'a pas tous ses jours ouvres.
   for(var T in P) for(var k = 0; k < P[T].length; k++){
     var a = P[T][k - 1];
-    P[T][k].niv = !a || a.O === null || !a.complet || (T !== 'jour' && k === 1 && !premierOuvre(T, a.debut)) ? null : niveaux(r.formule, a.H, a.L, a.C, a.O);
+    P[T][k].niv = !a || a.O === null || !a.complet || (T === 'jour' ? ouvresEntre(a.date, P[T][k].date) : a.nb < ouvres(T, a.debut)) ? null : niveaux(r.formule, a.H, a.L, a.C, a.O);
   }
   CACHE.cle = cle; CACHE.P = P;
   return P;
@@ -187,7 +219,7 @@ var def = {
     {k:'etiq', label:'Étiquettes', type:'check', defaut:true}
   ].concat(sousSection('jour', 'Pivots journaliers', '#5aa9e6'), sousSection('sem', 'Pivots hebdomadaires', '#ffb347'), sousSection('mois', 'Pivots mensuels', '#e0567f')),
   calcul:calcul,
-  outils:{niveaux:niveaux, premierOuvre:premierOuvre, semaine:semaine, complete:complete},
+  outils:{niveaux:niveaux, ouvres:ouvres, ouvresEntre:ouvresEntre, semaine:semaine, complete:complete},
   dessine:function(g, r){
     var P = calcul(g, r), F = g.cadre, e = g.echelle || 1;
     var deb = Math.max(0, g.premiere | 0), fin = Math.min(g.derniere | 0, (g.n | 0) - 1);

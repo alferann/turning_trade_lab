@@ -17,6 +17,7 @@
 | Profil de volume par période | `extensions/profil_periode.js` | Profil de volume de la séance, d'une séance US, Asie ou Europe, de la semaine ou du mois ; acheteurs et vendeurs empilés, POC, VAH et VAL, périodes précédentes ; quatre instances à superposer | [`docs/profil_periode.md`](docs/profil_periode.md) |
 | Hauts et bas des sessions précédentes | `extensions/niveaux_sessions.js` | Haut et bas de la dernière session close de Tokyo, Londres, New York et de la clôture, prolongés jusqu'au premier toucher ou à la première clôture au-delà ; notifications au choix | [`docs/niveaux_sessions.md`](docs/niveaux_sessions.md) |
 | Confluence Scanner | `extensions/confluence.js` | VWAP, profils de volume et TPO, pivots, veille, ouvertures et plages calculés sur le graphe, regroupés par proximité et notés ; les zones s'allument quand le prix approche | [`docs/confluence.md`](docs/confluence.md) |
+| Composite de volume | `extensions/composites.js` | Profil de volume roulant des N dernières séances, celui du Volume composite de Turning Trade, sur le Market Profile, les bougies et le footprint ; quatre instances à poser côte à côte (par exemple 30 séances au bord droit, 14 à sa gauche) | [`docs/composites.md`](docs/composites.md) |
 
 ## Installer
 
@@ -30,7 +31,7 @@
 
 ## Tester
 
-Chaque étude a un banc Node (testé avec Node.js 26) qui la rejoue sur des barres ES réelles archivées par Turning Trade (`_footprint_db_rec_ES.json` dans son dossier de données ; `TT_DATA` pour en changer).
+Chaque étude a un banc Node (testé avec Node.js 26) qui la rejoue sur des barres ES réelles archivées par Turning Trade (`_footprint_db_rec_ES.json` dans son dossier de données ; `TT_DATA` pour en changer). Les bancs lisent aussi des modules de Turning Trade dans son dossier d'installation, dont son calendrier de marché (`TT_PAYLOAD` pour en changer).
 
 ```bash
 node tests/vwap_pro_test.mjs
@@ -39,6 +40,7 @@ node tests/cvd_div_test.mjs
 node tests/poc_barre_test.mjs
 node tests/profil_periode_test.mjs
 node tests/confluence_test.mjs
+node tests/composites_test.mjs
 node tests/niveaux_sessions_test.mjs   # charge aussi les sessions du monde de Turning Trade (TT_PAYLOAD)
 node tests/i18n_test.mjs   # anglais de toutes les études, comparé au dictionnaire de Turning Trade (TT_PAYLOAD)
 ```
@@ -70,6 +72,7 @@ Third-party studies for [Turning Trade](https://turningtrade.com), the futures t
 | Period Volume Profile | `extensions/profil_periode.js` | Volume profile of the session, a US, Asian or European session, the week or the month; buyers and sellers stacked, POC, VAH and VAL, previous periods; four instances to stack | [`docs/profil_periode.md`](docs/profil_periode.md) |
 | Previous Session Highs and Lows | `extensions/niveaux_sessions.js` | High and low of the last closed Tokyo, London, New York and close session, extended until the first touch or the first close beyond; optional notifications | [`docs/niveaux_sessions.md`](docs/niveaux_sessions.md) |
 | Confluence Scanner | `extensions/confluence.js` | VWAP, volume and TPO profiles, pivots, previous session, opens and ranges computed on the chart, grouped by proximity and scored; zones light up as price approaches | [`docs/confluence.md`](docs/confluence.md) |
+| Volume Composite | `extensions/composites.js` | Rolling volume profile of the last N sessions, the one behind Turning Trade's Volume composite, on the Market Profile, candles and footprint; four instances to set side by side (for instance 30 sessions at the right edge, 14 next to it) | [`docs/composites.md`](docs/composites.md) |
 
 The getting-started guides are in French first, then in English.
 
@@ -85,7 +88,7 @@ The getting-started guides are in French first, then in English.
 
 ## Test
 
-Each study has a Node bench (tested with Node.js 26) that replays it on real ES bars archived by Turning Trade (`_footprint_db_rec_ES.json` in its data folder; `TT_DATA` to change it).
+Each study has a Node bench (tested with Node.js 26) that replays it on real ES bars archived by Turning Trade (`_footprint_db_rec_ES.json` in its data folder; `TT_DATA` to change it). The benches also read Turning Trade modules from its install folder, its market calendar among them (`TT_PAYLOAD` to change it).
 
 ```bash
 node tests/vwap_pro_test.mjs
@@ -94,6 +97,7 @@ node tests/cvd_div_test.mjs
 node tests/poc_barre_test.mjs
 node tests/profil_periode_test.mjs
 node tests/confluence_test.mjs
+node tests/composites_test.mjs
 node tests/niveaux_sessions_test.mjs   # also loads Turning Trade's world sessions (TT_PAYLOAD)
 node tests/i18n_test.mjs   # English of every study, checked against Turning Trade's dictionary (TT_PAYLOAD)
 ```

@@ -9,6 +9,8 @@ import path from 'node:path';
 
 const RACINE = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const SRC = fs.readFileSync(path.join(RACINE, 'extensions/profil_periode.js'), 'utf8');
+// TT's market calendar (hfq-sessions.js): full CME closures (New Year, Good Friday, Christmas) are no missing day.
+const HFQSessions = (() => { const c = {}; vm.runInContext(fs.readFileSync(path.join(process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Terminal/payload', 'hfq-sessions.js'), 'utf8'), vm.createContext(c)); return c.HFQSessions; })();
 const DB = path.join(process.env.TT_DATA || path.join(process.env.HOME, '.local/share/TurningTrade'), '_footprint_db_rec_ES.json');
 const PAYLOAD = process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Terminal/payload';
 
@@ -21,7 +23,7 @@ const kPlein = db.sessions.findLastIndex(s => s.bars.some(b => b.m >= 1320)), pl
 const iPlein = bars.findIndex(b => b._date === plein.date), BP = bars.slice(0, iPlein + plein.bars.length);
 
 // Each context gets its own study instances; `extra` adds globals such as HFQSessionsMonde.
-const charger = (extra = {}) => { const defs = []; vm.runInContext(SRC, vm.createContext(Object.assign({ HFQExt: { etude(d) { defs.push(d); return true; } }, console, performance }, extra))); return defs; };
+const charger = (extra = {}) => { const defs = []; vm.runInContext(SRC, vm.createContext(Object.assign({ HFQExt: { etude(d) { defs.push(d); return true; } }, console, performance, HFQSessions }, extra))); return defs; };
 const defs = charger();
 assert.deepEqual(defs.map(d => d.id), ['profil-periode', 'profil-periode-b', 'profil-periode-c', 'profil-periode-d'], 'ids stables');
 assert.deepEqual(defs.map(d => d.reglages[0].defaut), ['jour', 'sem', 'mois', 'us'], 'période par défaut de chaque instance');
@@ -81,18 +83,23 @@ const sem = d => E.outils.semaine(d);
   assert.ok(R80.vah - R80.val > R.vah - R.val, 'VA 80 % plus large');
 }
 
+// Weekdays strictly between two dates: one without a session passes for a holiday, two make a hole.
+const manquent = (a, b) => { let n = 0; for (let d = Date.parse(a) + 864e5; d < Date.parse(b); d += 864e5) if (new Date(d).getUTCDay() % 6) n++; return n; };
+
 // 3. Week and month on real ES: the sessions of the last one's ISO week and month; partial when the chart
-// starts inside them. A partial previous period is left out.
+// starts inside them. A previous period that is partial, or incomplete (a session joined late or cut more than
+// 4 h before the close, two weekdays without a session, as the archive may hold), is left out.
 {
-  const partiel = (T, S) => S[0] === db.sessions[0] && !E.outils.premierOuvre(T, S[0].date) ? S[0].date : null;
+  const partiel = (T, S) => !E.outils.premierOuvre(T, S[0].date) || S[0].bars[0].m >= 60 ? S[0].date : null;
+  const entiere = (T, S) => !partiel(T, S) && S.every((s, i) => s.bars[0].m < 60 && s.bars.at(-1).m >= 1140 && (!i || manquent(S[i - 1].date, s.date) <= 1));
   for (const [T, cle] of [['sem', sem], ['mois', d => d.slice(0, 7)]]) {
     const S = db.sessions.filter(s => cle(s.date) === cle(last.date)), R = cour(g(), avec({ periode: T }));
     egal(R, reference(S.flatMap(s => s.bars)), T + ' : ' + S.length + ' séances');
     assert.equal(R.partiel, partiel(T, S), T + ' : partiel');
     assert.equal(R.cle, T === 'sem' ? sem(last.date).slice(5) : last.date.slice(0, 7));
-    // The last three previous periods, whatever the archive spans, but the partial first one.
+    // The last three previous periods, whatever the archive spans, but the partial or incomplete ones.
     const avant = db.sessions.filter(s => cle(s.date) < cle(last.date)), prec = complet(g(bars, { premiere: 0 }), avec({ periode: T, hist: 3 })).prec;
-    const attendu = [...new Set(avant.map(s => cle(s.date)))].slice(-3).filter(c => !(c === cle(avant[0]?.date) && partiel(T, avant)));
+    const attendu = [...new Set(avant.map(s => cle(s.date)))].slice(-3).filter(c => entiere(T, avant.filter(s => cle(s.date) === c)));
     assert.deepEqual(prec.map(R => R.cle), attendu.map(c => T === 'sem' ? c.slice(5) : c), T + ' : précédents, partiel omis');
   }
 }
@@ -122,23 +129,26 @@ const sem = d => E.outils.semaine(d);
     for (const [t, e] of Object.entries(plat(R))) { const s = total[t] ||= [0, 0]; s[0] += e[0]; s[1] += e[1]; }
   }
   assert.deepEqual(total, reference(plein.bars, m => m < 1320), 'Asie + Europe + US = séance sans sa dernière heure');
-  // Previous sessions keep their own window; a recording cut before 09:30 has no RTH.
+  // Previous sessions keep their own window; a recording cut before 09:30 has no RTH, one cut during it (last
+  // RTH bar more than an hour before 16:00 and before 13:00) is left out.
   const prec = complet(g(BP, { premiere: 0 }), avec({ periode: 'us', hist: 9 })).prec;
-  const avecRTH = db.sessions.slice(0, kPlein).filter(s => s.bars.some(b => fen.us(b.m)));
-  assert.equal(prec.length, avecRTH.length, 'une RTH par séance précédente qui en a');
+  const touchent = db.sessions.slice(0, kPlein).filter(s => s.bars.some(b => fen.us(b.m)));
+  const avecRTH = touchent.filter(s => { const U = s.bars.filter(b => fen.us(b.m)); return U[0].m < 990 && U.at(-1).m >= 1140; });
+  assert.equal(prec.length, avecRTH.length, 'une RTH par séance précédente qui l\'a entière');
   prec.forEach((R, k) => egal(R, reference(avecRTH[k].bars, fen.us), 'RTH du ' + avecRTH[k].date));
   // Before 09:30 the last US session is the previous one; Europe is already today's.
   const tot = BP.slice(0, iPlein + plein.bars.findIndex(b => b.m >= 900));
-  assert.equal(cour(g(tot), avec({ periode: 'us' })).cle, avecRTH.at(-1).date, 'avant 09:30 : RTH de la veille');
+  assert.equal(cour(g(tot), avec({ periode: 'us' })).cle, touchent.at(-1).date, 'avant 09:30 : RTH de la veille');
   assert.equal(cour(g(tot), avec({ periode: 'eu' })).cle, plein.date, 'Europe du jour');
   // TT's world sessions win over the defaults: US moved to 10:00-11:00 ET.
   const D = charger({ HFQSessionsMonde: { bornes: () => [{ id: 'us', debut: 36000, fin: 39600 }] } })[0];
   egal(cour(g(BP), avec({ periode: 'us' }), D), reference(plein.bars, entre(960, 1020)), 'sessions de TT');
 }
 
-// Synthetic weekday sessions of three one-minute bars with three levels each.
+// Synthetic weekday sessions of three one-minute bars with three levels each, by default at the open, the next
+// minute and the last minute, so that each session runs to its close.
 const jours = (de, a) => { const out = []; for (let d = new Date(de + 'T00:00:00Z'); d <= new Date(a + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1)) if (d.getUTCDay() % 6) out.push(d.toISOString().slice(0, 10)); return out; };
-const synth = (dates, m0 = 0) => dates.flatMap((date, s) => [0, 1, 2].map(k => { const b = 100 + 0.25 * ((s * 7 + k) % 40); return { _date: date, m: m0 + k, o: b, h: b + 0.5, l: b, c: b + 0.25, v: 6, lv: [[b, 1, 1], [b + 0.25, s % 3, 2], [b + 0.5, 1, k]] }; }));
+const synth = (dates, M = [0, 1, 1379]) => dates.flatMap((date, s) => [0, 1, 2].map(k => { const b = 100 + 0.25 * ((s * 7 + k) % 40); return { _date: date, m: M[k], o: b, h: b + 0.5, l: b, c: b + 0.25, v: 6, lv: [[b, 1, 1], [b + 0.25, s % 3, 2], [b + 0.5, 1, k]] }; }));
 
 // 6. Calendar periods: only the sessions of the current ISO week or month; complete when loaded from the start.
 // An RTH chart has no Asian session.
@@ -154,7 +164,7 @@ const synth = (dates, m0 = 0) => dates.flatMap((date, s) => [0, 1, 2].map(k => {
   assert.equal(cour(g(B.filter(b => b._date >= '2026-10-02')), avec({ periode: 'mois' })).partiel, '2026-10-02', 'octobre chargé depuis le 2 : partiel');
   assert.equal(cour(g(B.filter(b => b._date >= '2026-10-12')), avec({ periode: 'sem' })).partiel, null, 'semaine chargée depuis son lundi');
   egal(cour(g(B), defaut), reference(parDate(B, d => d === '2026-10-14')), 'séance du 14');
-  assert.match(complet(g(B, { seance: 'rth' }), avec({ periode: 'asie' })).raison, /fenêtre de séance/, 'pas d\'Asie sur un graphe RTH');
+  assert.match(complet(g(synth(jours('2026-10-12', '2026-10-14'), [0, 1, 389]), { seance: 'rth' }), avec({ periode: 'asie' })).raison, /fenêtre de séance/, 'pas d\'Asie sur un graphe RTH');
   const tard = B.filter(b => b._date >= '2026-10-12').map(b => b._date === '2026-10-12' ? Object.assign({}, b, { m: b.m + 100 }) : b);
   assert.equal(cour(g(tard), avec({ periode: 'sem' })).partiel, '2026-10-12', 'lundi pris plus d\'une heure après son ouverture : partiel');
 }
@@ -225,6 +235,120 @@ const synth = (dates, m0 = 0) => dates.flatMap((date, s) => [0, 1, 2].map(k => {
   assert.equal(appels.length, avant, 'graphe en minutes : rien lu');
 }
 
+// 6c. Nothing displayed on missing data. Real whole sessions on the business days from Monday 2 November (winter
+// time on both sides: Asia m ∈ [0, 540), Europe [540, 930), US [930, 1320)), on minute charts.
+const PL = db.sessions.filter(s => s.bars[0].m === 0 && s.bars.at(-1).m >= 1370);
+const NOV = ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-09', '2026-11-10'].map((date, k) => ({ date, bars: PL[k % PL.length].bars }));
+const aplat = S => S.flatMap(s => s.bars.map(b => Object.assign({ _date: s.date }, b)));
+const coupe = (s, f) => ({ date: s.date, bars: s.bars.filter(f) });
+const trous = date => Array.from({ length: 8 }, () => ({ _trou: true, _date: date, m: 0, o: 7000, h: 7000, l: 7000, c: 7000, lv: [] }));
+const FN = Object.fromEntries(['us', 'eu', 'asie'].map(T => { const [a, z] = E.outils.bornesET(T, '2026-11-04').map(v => (v - 1080 + 1440) % 1440); return [T, entre(a, z <= a ? z + 1440 : z)]; }));
+const cles = X => X.prec.map(R => R.cle);
+// Caption and painted rectangles of a chart whose compute is done.
+const vue = (B, r, o = {}) => { const G = g(B, Object.assign({ premiere: 0 }, o)), X = complet(G, r); rec.length = 0; E.dessine(G, r); return { X, textes: rec.filter(x => x.k === 'texte').map(x => x.s), rects: rec.filter(x => x.k === 'rect').length }; };
+{
+  assert.ok(PL.length >= 1, 'une séance entière dans l\'archive');
+  assert.deepEqual(['asie', 'eu', 'us'].map(T => [0, 540, 930].findIndex(m => FN[T](m))), [0, 1, 2], 'fenêtres d\'hiver');
+  const X = (B, r) => complet(g(B, { premiere: 0 }), r);
+
+  // Joined at 05:40 ET on Monday 2 (m 700, Europe opened at m 540): its session and its Europe are left out of the
+  // previous periods, its US session, which opens later, is kept whole. Joined so on the current day: masked, and
+  // the caption says it.
+  const L = aplat([coupe(NOV[0], b => b.m >= 700), NOV[1], NOV[2]]);
+  assert.deepEqual(cles(X(L, avec({ hist: 2 }))), ['2026-11-03'], 'séance du 2 prise à 05:40 omise');
+  assert.deepEqual(cles(X(L, avec({ periode: 'eu', hist: 2 }))), ['2026-11-03'], 'Europe du 2 omise');
+  const U = X(L, avec({ periode: 'us', hist: 2 })).prec;
+  assert.deepEqual(U.map(R => R.cle), ['2026-11-02', '2026-11-03'], 'RTH du 2 gardée');
+  egal(U[0], reference(NOV[0].bars, FN.us), 'RTH du 2 entière');
+  const T = aplat([NOV[0], coupe(NOV[1], b => b.m >= 700)]);
+  for (const [periode, titre] of [['jour', 'Séance 2026-11-03'], ['eu', 'Séance Europe 2026-11-03']]) {
+    const V = vue(T, avec({ periode }));
+    assert.deepEqual([V.textes, V.rects], [[titre + ' · masqué : partiel'], 0], periode + ' prise à 05:40 : masquée, légende');
+  }
+  assert.equal(vue(T, avec({ periode: 'us' })).X.cour.partiel, null, 'RTH du 3 entière');
+
+  // A previous session cut at 07:37 ET (m 817): its session and its Europe are left out, its Asia kept; it has no RTH.
+  const C = aplat([NOV[0], coupe(NOV[1], b => b.m < 818), NOV[2]]);
+  assert.deepEqual(cles(X(C, avec({ hist: 2 }))), ['2026-11-02'], 'séance coupée à 07:37 omise');
+  assert.deepEqual(cles(X(C, avec({ periode: 'eu', hist: 2 }))), ['2026-11-02'], 'Europe coupée omise');
+  assert.deepEqual(cles(X(C, avec({ periode: 'asie', hist: 2 }))), ['2026-11-02', '2026-11-03'], 'Asie entière gardée');
+  assert.deepEqual(cles(X(C, avec({ periode: 'us', hist: 2 }))), ['2026-11-02'], 'pas de RTH le 3');
+  // A holiday early close at 13:15 ET is a whole session, and its RTH too.
+  assert.deepEqual(cles(X(aplat([NOV[0], coupe(NOV[1], b => b.m < 1155), NOV[2]]), avec({ periode: 'us', hist: 2 }))), ['2026-11-02', '2026-11-03'], 'RTH close à 13:15 gardée');
+  // A TT session straddling the chart's open, 16:00 → 18:30 ET: its part after the open lacks its first hour, masked;
+  // 17:00 → 18:30 starts in the maintenance break, so the open starts it.
+  const chevauche = debut => cour(g(aplat(NOV.slice(0, 2))), avec({ periode: 'us' }), charger({ HFQSessionsMonde: { bornes: () => [{ id: 'us', debut, fin: 66600 }] } })[0]).partiel;
+  assert.deepEqual([chevauche(57600), chevauche(61200)], [true, null], 'session à cheval sur l\'ouverture');
+  // The current RTH, once over, must have run to its end: cut at 10:40 ET and resumed at 16:10, it is masked;
+  // still in progress at 10:40, it is drawn.
+  assert.equal(X(aplat([NOV[0], coupe(NOV[1], b => b.m <= 1000 || b.m >= 1330)]), avec({ periode: 'us' })).cour.partiel, true, 'RTH finie tronquée : masquée');
+  assert.equal(X(aplat([NOV[0], coupe(NOV[1], b => b.m <= 1000)]), avec({ periode: 'us' })).cour.partiel, null, 'RTH en cours : tracée');
+
+  // Weeks: a session cut at 07:37 ET, a missing day (TT's filler bars, also outside the RTH window), a session joined
+  // late or a weekday without a session make the week incomplete, named in the caption; a full CME closure from
+  // TT's calendar does not. A week that does not start on its Monday further on is partial.
+  const W = avec({ periode: 'sem' }), WR = avec({ periode: 'sem', rth: true });
+  const TR = [...aplat([NOV[0]]), ...trous('2026-11-03'), ...aplat([NOV[2]])];
+  const cas = [['coupée', aplat([NOV[0], coupe(NOV[1], b => b.m < 818), NOV[2]]), W, '2026-11-03'], ['comblée', TR, W, '2026-11-03'],
+    ['comblée, RTH seul', TR, WR, '2026-11-03'], ['entamée à 05:40', aplat([NOV[0], coupe(NOV[1], b => b.m >= 700), NOV[2]]), W, '2026-11-03'],
+    ['mardi et mercredi sans séance', aplat([NOV[0], NOV[3]]), W, '2026-11-05'], ['mardi sans séance', aplat([NOV[0], NOV[2]]), W, '2026-11-04'],
+    ['clôture anticipée à 13:15', aplat([NOV[0], coupe(NOV[1], b => b.m < 1155), NOV[2]]), W, null]];
+  for (const [nom, B, r, date] of cas) assert.deepEqual([X(B, r).cour.incomplet, X(B, r).cour.partiel], [date, null], 'semaine ' + nom);
+  assert.equal(X(aplat([...NOV.slice(0, 5), NOV[6]]), W).cour.partiel, '2026-11-10', 'semaine 46 sans son lundi : partielle');
+  const V = vue(TR, W);
+  assert.deepEqual([V.textes, V.rects], [['Semaine 45 · masqué : séance manquante ou incomplète le 2026-11-03'], 0], 'jour manquant : légende');
+  assert.deepEqual(cles(X([...TR, ...aplat(NOV.slice(3))], avec({ periode: 'sem', hist: 1 }))), [], 'semaine précédente comblée omise');
+  assert.deepEqual(cles(X(aplat(NOV), avec({ periode: 'sem', hist: 1 }))), ['45'], 'semaine précédente entière gardée');
+
+  // Footprint, without dates: a first session joined at 05:40 ET is masked, "partial" alone; the next one is drawn.
+  const sans = B => B.map(b => { const c = Object.assign({}, b); delete c._date; return c; });
+  const F = sans(aplat([coupe(NOV[0], b => b.m >= 700)]));
+  assert.deepEqual(vue(F, defaut).textes, ['Séance · masqué : partiel'], 'footprint pris à 05:40 : masqué');
+  const F2 = X(sans(aplat([coupe(NOV[0], b => b.m >= 700), NOV[1]])), avec({ hist: 1 }));
+  assert.deepEqual([F2.prec.length, F2.cour.partiel], [0, null], 'footprint : séance suivante tracée');
+}
+
+// 6d. Tick charts: a session, or its Europe, joined at 05:40 ET is completed from the one-minute file, equal to the
+// whole one; masked if the file starts the session late, stops more than an hour before the first tick bar, or
+// lacks the day. A week completed from the file must get whole sessions from it, and no two missing weekdays.
+{
+  const FICHIERS = {}, attente = [];
+  const D = charger({ HFQSymGuard: { histFile: (t, s) => t + '_' + s + '.json' },
+    fetch: f => new Promise(ok => attente.push(() => ok({ json: () => FICHIERS[f] }))) })[0];
+  const servir = async () => { attente.splice(0).forEach(x => x()); await new Promise(r => setImmediate(r)); };
+  const ticks = (B, sym, S) => { FICHIERS['_footprint_eth_' + sym + '.json'] = { sessions: S }; return g(B, { sym, tf: '1000t', premiere: 0 }); };
+  const du4 = (f, S = NOV) => S.map(s => s.date === '2026-11-04' ? coupe(s, f) : s), mer = coupe(NOV[2], b => b.m >= 700), T = aplat([mer]);
+  const G = { ok: ticks(T, 'N1', NOV), tard: ticks(T, 'N2', du4(b => b.m >= 300)), court: ticks(T, 'N3', du4(b => b.m < 500)), sans: ticks(T, 'N4', NOV.filter(s => s.date !== '2026-11-04')) };
+  const J = defaut, U = avec({ periode: 'eu' });
+  for (const x of Object.values(G)) { cour(x, J, D); cour(x, U, D); }
+  assert.equal(cour(G.ok, J, D).partiel, true, 'masqué tant que le fichier n\'est pas lu');
+  await servir();
+  const C = cour(G.ok, J, D);
+  assert.equal(C.partiel, null, 'séance du 4 complétée');
+  egal(C, reference(NOV[2].bars), 'séance du 4 complétée = séance entière');
+  egal(cour(G.ok, U, D), reference(NOV[2].bars, FN.eu), 'Europe du 4 complétée');
+  assert.equal(cour(G.tard, J, D).partiel, true, 'fichier qui prend le 4 à 23:00 : séance masquée');
+  const E2 = cour(G.tard, U, D);
+  assert.equal(E2.partiel, null); egal(E2, reference(NOV[2].bars, FN.eu), 'fichier qui prend le 4 à 23:00 : Europe complétée');
+  for (const nom of ['court', 'sans']) assert.deepEqual([cour(G[nom], J, D).partiel, cour(G[nom], U, D).partiel], [true, true], 'fichier ' + nom + ' : masqué');
+
+  // Week from a tick chart: from Wednesday 4, masked if the file cuts Tuesday 3 at 07:37 ET or starts it at 23:00,
+  // or, joined at 05:40 on the 4th, lacks Wednesday; from Friday 6, masked if Tuesday and Wednesday are both
+  // missing, and if only Wednesday is; completed across Good Friday, a full CME closure in TT's calendar.
+  const Wk = avec({ periode: 'sem' }), d4 = aplat(NOV.slice(2, 5)), d4b = aplat([mer, NOV[3], NOV[4]]), d6 = aplat([NOV[4]]);
+  const du3 = f => NOV.map(s => s.date === '2026-11-03' ? coupe(s, f) : s);
+  const cas = [['coupé', d4, du3(b => b.m < 818), '2026-11-04'], ['tard', d4, du3(b => b.m >= 300), '2026-11-04'],
+    ['sans le mercredi', d4b, NOV.filter(s => s.date !== '2026-11-04'), '2026-11-04'], ['entier', d4b, NOV, null],
+    ['deux jours', d6, [NOV[0], NOV[3]], '2026-11-06'], ['un jour', d6, [NOV[0], NOV[1], NOV[3]], '2026-11-06']];
+  const GW = cas.map(([, B, S], k) => ticks(B, 'NW' + k, S));
+  GW.forEach(x => cour(x, Wk, D)); await servir();
+  cas.forEach(([nom, , , partiel], k) => assert.equal(cour(GW[k], Wk, D).partiel, partiel, 'fichier ' + nom));
+  const AV = ['2026-03-30', '2026-03-31', '2026-04-01', '2026-04-02', '2026-04-06'].slice(2).map((date, k) => ({ date, bars: NOV[k].bars })), GA = ticks(aplat([AV[2]]), 'GF', AV.slice(0, 2));
+  cour(GA, avec({ periode: 'mois' }), D); await servir();
+  egal(cour(GA, avec({ periode: 'mois' }), D), reference(aplat(AV)), 'avril complété par-dessus le Vendredi saint');
+  egal(cour(GW[3], Wk, D), reference(aplat(NOV.slice(0, 5))), 'semaine complétée depuis le 4 à 05:40');
+}
+
 // 7. Bars without levels are counted, not invented; none at all gives a reason. No dates: session only.
 {
   const B = synth(jours('2026-10-12', '2026-10-14'));
@@ -239,7 +363,8 @@ const synth = (dates, m0 = 0) => dates.flatMap((date, s) => [0, 1, 2].map(k => {
   egal(cour(g(sans), defaut), reference(B.slice(-3)), 'séance retrouvée sans date');
   assert.match(complet(g(sans), avec({ periode: 'sem' })).raison, /sans date/);
   const trou = B.slice(); trou[trou.length - 2] = Object.assign({}, trou[trou.length - 2], { _trou: true });
-  assert.equal(cour(g(trou), defaut).nb, 2, 'barre de comblement ignorée');
+  const RT = cour(g(trou), defaut);
+  assert.deepEqual([RT.nb, RT.partiel], [2, true], 'barre de comblement ignorée, séance masquée');
 }
 
 // 8. Incremental: the last bar grows, then a new session opens; same profile as from scratch.
@@ -328,7 +453,7 @@ const POINTS = { plein: null, tirets: [6, 4], points: [2, 3] };
     ['wVAL ' + prix(R.val), 4, R.val * 0.25 - 2, 'bottom'], ['Semaine 42', 996, 12, undefined]], 'prix au-dessus des lignes, à gauche, et légende');
   // Each instance writes its caption on its own line; session names carry the session.
   assert.equal(dessin(r, G, defs[1]).textes.at(-1).y, 25, 'légende de l\'instance B');
-  assert.deepEqual(dessin(avec({ periode: 'us' }), g(synth(jours('2026-10-12', '2026-10-14'), 1000))).textes.map(x => x.s.split(' ').slice(0, 2).join(' ')),
+  assert.deepEqual(dessin(avec({ periode: 'us' }), g(synth(jours('2026-10-12', '2026-10-14'), [930, 931, 932]))).textes.map(x => x.s.split(' ').slice(0, 2).join(' ')),
     ['POC RTH', 'VAH RTH', 'VAL RTH', 'Séance US'], 'niveaux de la RTH');
   assert.deepEqual(dessin(avec({ periode: 'sem', pocL: false, vaL: false, etiq: false })).traits, [], 'sans lignes');
   assert.deepEqual(dessin(avec({ periode: 'sem', pocL: false, vaL: false, etiq: false })).textes, [], 'ni étiquettes');
@@ -393,9 +518,12 @@ if (fs.existsSync(path.join(PAYLOAD, 'hfq-composite-vp.js'))) {
   ctx.window = ctx;
   const C = vm.createContext(ctx);
   for (const f of ['hfq-va.js', 'hfq-composite-vp.js']) vm.runInContext(fs.readFileSync(path.join(PAYLOAD, f), 'utf8'), C);
-  const prec = complet(g(bars, { premiere: 0 }), avec({ hist: 9 })).prec.concat([cour(g(), defaut)]);
-  db.sessions.forEach((s, k) => {
-    const tt = ctx.HFQCompositeVP.buildFromBars(s.bars, { tick: 0.25, vaPct: 0.7 }).profile, R = prec[k];
+  // Sessions cut short are not drawn, so not compared.
+  const prec = complet(g(bars, { premiere: 0 }), avec({ hist: 9 })).prec.concat([cour(g(), defaut)]), parDate = new Map(prec.map(R => [R.cle, R]));
+  const vus = db.sessions.filter(s => parDate.has(s.date));
+  assert.ok(vus.length >= 2, 'au moins deux séances comparées');
+  vus.forEach(s => {
+    const tt = ctx.HFQCompositeVP.buildFromBars(s.bars, { tick: 0.25, vaPct: 0.7 }).profile, R = parDate.get(s.date);
     assert.deepEqual([R.poc, R.vah, R.val].map(t => t * 0.25), [tt.poc, tt.vah, tt.val], 'comme le SVP de TT, ' + s.date);
   });
 } else console.warn('payload de TT introuvable, comparaison avec son profil sautée :', PAYLOAD);
@@ -429,6 +557,37 @@ if (fs.existsSync(path.join(PAYLOAD, 'hfq-composite-vp.js'))) {
   egal(X.prec[0], reference(parDate(B, d => d === '2026-09-22')), 'première séance');
   const t1 = performance.now(); for (let k = 0; k < 50; k++) { defs[2].dessine(G, rM); E.dessine(G, rJ); } const chaud = (performance.now() - t1) / 100;
   assert.ok(chaud < 2, 'image en cache : ' + chaud.toFixed(3) + ' ms');
+  // NQ-like load: eighty levels per one-minute bar, a session reads in 10 ms or more in one block. The cold
+  // compute of "session + nine previous" and the live session, its last bar moving every frame, stay within
+  // TT's rule: never three frames over 8 ms in a row.
+  const NQ = jours('2026-10-01', '2026-10-14').flatMap((date, s) => Array.from({ length: 1380 }, (_, m) => {
+    const b = Math.round((20000 + 60 * Math.sin(s + m / 150)) * 4) / 4;
+    return { _date: date, m, o: b, h: b + 10, l: b - 10, c: b, lv: Array.from({ length: 80 }, (_, k) => [b - 10 + k * 0.25, 1 + (m + k) % 5, 1 + (k % 4)]) };
+  }));
+  const GN = Bn => g(Bn, { sym: 'NQL', premiere: 0, cadre: { gauche: 0, droite: 1000, haut: 0, bas: 600, largeur: 1000, hauteur: 600 }, x: i => i * 1000 / Bn.length, y: v => 600 - (v - 19900) * 2 });
+  const rN = avec({ hist: 9 }), suite = L => L.some((v, k) => k >= 2 && v > 8 && L[k - 1] > 8 && L[k - 2] > 8);
+  const froid = [];
+  for (let k = 0, X = null; k < 400 && !X; k++) { const t = performance.now(); X = defs[3].calcul(GN(NQ), rN); froid.push(performance.now() - t); }
+  assert.ok(!suite(froid) && Math.max(...froid) < 30, 'NQ à froid : lecture étalée, pas trois images lentes de suite : ' + froid.map(v => v.toFixed(1)).join(' '));
+  const direct = [];
+  for (let k = 1; k <= 30; k++) {
+    const Bn = NQ.slice(), d = Bn[Bn.length - 1];
+    Bn[Bn.length - 1] = Object.assign({}, d, { c: d.c + k * 0.25, lv: d.lv.map(([p, bi, a]) => [p, bi + k, a]) });
+    const t = performance.now(); defs[3].calcul(GN(Bn), rN); direct.push(performance.now() - t);
+  }
+  assert.ok(Math.max(...direct.slice(1)) < 4, 'NQ en direct : la dernière barre seule est relue, pire ' + Math.max(...direct.slice(1)).toFixed(2) + ' ms');
+  egal(cour(GN(NQ), defaut, defs[3]), reference(parDate(NQ, d => d === '2026-10-14')), 'NQ : séance en cours exacte');
+  // A tick chart holding the last two sessions: October completed from a minute file of eight NQ sessions,
+  // read over several frames.
+  const fichierNQ = { sessions: jours('2026-10-01', '2026-10-14').map(date => ({ date, bars: NQ.filter(b => b._date === date).map(({ _date, ...b }) => b) })) };
+  const DN = charger({ HFQSymGuard: { histFile: (t, s) => t + '_' + s + '.json' }, fetch: () => Promise.resolve({ json: () => fichierNQ }) })[2];
+  const GT = g(NQ.filter(b => b._date >= '2026-10-13'), { sym: 'NQF', tf: '1000t' }), rMo = avec({ periode: 'mois' });
+  DN.calcul(GT, rMo); await new Promise(r => setImmediate(r));
+  const fic = []; let XF = null;
+  for (let k = 0; k < 400 && !XF; k++) { const t = performance.now(); XF = DN.calcul(GT, rMo); fic.push(performance.now() - t); }
+  assert.ok(!suite(fic) && Math.max(...fic) < 30, 'NQ : fichier minute lu sur plusieurs images : ' + fic.map(v => v.toFixed(1)).join(' '));
+  egal(XF.cour, reference(NQ), 'NQ : octobre complété par le fichier');
+  console.log('  NQ, 80 niveaux par barre : froid', froid.length, 'images, pire', Math.max(...froid).toFixed(1), 'ms ; fichier', fic.length, 'images, pire', Math.max(...fic).toFixed(1), 'ms ; direct, pire', Math.max(...direct.slice(1)).toFixed(2), 'ms');
   const R = cour(g(), defaut), S = cour(g(), avec({ periode: 'sem' })), U = cour(g(), avec({ periode: 'us' }));
   console.log('OK', bars.length, 'barres ES,', db.sessions.length, 'séances | séance POC', (R.poc * 0.25).toFixed(2), 'VA', (R.val * 0.25).toFixed(2), '-', (R.vah * 0.25).toFixed(2),
     '| RTH POC', (U.poc * 0.25).toFixed(2), '| semaine POC', (S.poc * 0.25).toFixed(2), '|', B.length, 'barres synthétiques,', images, 'images, pire', pire.toFixed(2), 'ms, chaud', chaud.toFixed(3), 'ms');

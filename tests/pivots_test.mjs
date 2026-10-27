@@ -9,6 +9,8 @@ import path from 'node:path';
 
 const RACINE = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const SRC = fs.readFileSync(path.join(RACINE, 'extensions/pivots.js'), 'utf8');
+// TT's market calendar (hfq-sessions.js): full CME closures (New Year, Good Friday, Christmas) are no missing day.
+const HFQSessions = (() => { const c = {}; vm.runInContext(fs.readFileSync(path.join(process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Terminal/payload', 'hfq-sessions.js'), 'utf8'), vm.createContext(c)); return c.HFQSessions; })();
 const DB = path.join(process.env.TT_DATA || path.join(process.env.HOME, '.local/share/TurningTrade'), '_footprint_db_rec_ES.json');
 
 const db = JSON.parse(fs.readFileSync(DB, 'utf8'));
@@ -17,7 +19,7 @@ for (const s of db.sessions) for (const b of s.bars) bars.push(Object.assign({ _
 const N = bars.length;
 
 const defs = [];
-vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console }));
+vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console, HFQSessions }));
 assert.equal(defs.length, 1);
 const E = defs[0];
 assert.equal(E.id, 'pivots', 'id stable');
@@ -36,8 +38,11 @@ const prix = niv => Object.fromEntries(niv.map(([n, p]) => [n, p]));
 const complete = bs => bs.length > 0 && bs[0].m <= 60 && bs[bs.length - 1].m >= 1380 - 240;
 const rthDe = s => s.bars.filter(b => b.m >= 930 && b.m < 1320);
 const completeRth = bs => bs.length > 0 && bs[0].m <= 930 + 60 && bs[bs.length - 1].m >= 1320 - 240;
-// Last archive session whose previous one covers its session (and its RTH window): the reference day below.
-const K = db.sessions.findLastIndex((s, k) => k > 0 && complete(db.sessions[k - 1].bars) && completeRth(rthDe(db.sessions[k - 1])));
+// No weekday strictly between two session dates: the previous session is the previous weekday.
+const contigus = (a, b) => { for (let d = new Date(a + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1) < new Date(b + 'T00:00:00Z');) if (d.getUTCDay() % 6) return false; return true; };
+const veille = k => k > 0 && complete(db.sessions[k - 1].bars) && contigus(db.sessions[k - 1].date, db.sessions[k].date);
+// Last archive session whose previous one is the previous weekday and covers its session (and its RTH window): the reference day below.
+const K = db.sessions.findLastIndex((s, k) => veille(k) && completeRth(rthDe(db.sessions[k - 1])));
 assert.ok(K > 0, 'une séance de l\'archive avec une veille complète');
 const finK = db.sessions.slice(0, K + 1).reduce((n, s) => n + s.bars.length, 0);
 const barsK = bars.slice(0, finK);
@@ -63,7 +68,7 @@ const barsK = bars.slice(0, finK);
 }
 
 // 2. Daily on real ES bars: each session carries the pivots of the previous one if that one
-// covers its session, none otherwise; the first session has none.
+// is the previous weekday and covers its session, none otherwise; the first session has none.
 {
   const P = E.calcul(g(), defaut);
   assert.equal(P.jour.length, db.sessions.length, 'une période par séance');
@@ -73,7 +78,7 @@ const barsK = bars.slice(0, finK);
     assert.equal(P.jour[k].deb, i0, 'début de séance ' + s.date); i0 += s.bars.length;
     assert.equal(P.jour[k].fin, i0 - 1, 'fin de séance ' + s.date);
     if (!k) return;
-    if (!complete(db.sessions[k - 1].bars)) return assert.equal(P.jour[k].niv, null, 'veille incomplète, rien le ' + s.date);
+    if (!veille(k)) return assert.equal(P.jour[k].niv, null, 'veille incomplète ou manquante, rien le ' + s.date);
     const v = hlc(db.sessions[k - 1].bars), R = prix(P.jour[k].niv);
     proche(R.PP, (v.H + v.L + v.C) / 3, 'PP ' + s.date);
     proche(R.R1, 2 * R.PP - v.L, 'R1 ' + s.date);
@@ -107,11 +112,9 @@ const de = (B, f) => hlc(B.filter(f));
 
 // 5. Week and month completeness. Sept 1 2026 is a Tuesday, ISO week 36 opens Monday Aug 31.
 {
-  assert.equal(E.outils.premierOuvre('mois', '2026-09-01'), true, '1er septembre, mardi');
-  assert.equal(E.outils.premierOuvre('mois', '2026-11-02'), true, 'lundi 2 novembre après un week-end');
-  assert.equal(E.outils.premierOuvre('mois', '2026-11-03'), false, 'mardi 3 novembre');
-  assert.equal(E.outils.premierOuvre('sem', '2026-09-07'), true, 'lundi');
-  assert.equal(E.outils.premierOuvre('sem', '2026-09-01'), false, 'mardi');
+  assert.deepEqual(['2026-09-01', '2026-10-30', '2026-11-02', '2026-02-10'].map(d => E.outils.ouvres('mois', d)), [22, 22, 21, 20], 'jours ouvrés du mois');
+  assert.equal(E.outils.ouvres('sem', '2026-09-01'), 5, 'cinq jours ouvrés par semaine');
+  assert.deepEqual([['2026-10-16', '2026-10-19'], ['2026-10-19', '2026-10-22'], ['2026-10-22', '2026-10-26'], ['', '2026-10-26']].map(([a, b]) => E.outils.ouvresEntre(a, b)), [0, 2, 1, 0], 'jours ouvrés manquants entre deux séances');
 
   const B = synth(jours('2026-09-01', '2026-10-16'));
   const P = E.calcul(g(B), defaut);
@@ -232,4 +235,48 @@ const de = (B, f) => hlc(B.filter(f));
   const d6 = jours('2026-10-05', '2026-10-12'), C = minutes(d6), avant = C.filter(b => b._date !== d6[2]), apres = C.filter(b => b._date !== d6[5]);
   E.calcul(sur(avant), defaut);
   assert.deepEqual(JSON.parse(JSON.stringify(E.calcul(sur(apres), defaut))), JSON.parse(JSON.stringify(E.calcul(Object.assign(g(apres), { sym: 'NEUF3' }), defaut))), 'même nombre de barres, autre contenu');
+}
+
+// 11. Missing data: a weekday missing between two loaded sessions (tick history without TT's filler
+// bars, footprint), TT's filler block for a missing day, a week or month short of one weekday.
+{
+  const d = jours('2026-10-05', '2026-10-16'), B = minutes(d), sans = jour => B.filter(b => b._date !== jour);
+  // A symbol per chart: two charts with the same bar count and the same end bars share the cache key.
+  let nc = 0;
+  const jour = bs => E.calcul(Object.assign(g(bs), { sym: 'MQ' + nc++ }), defaut).jour;
+  // Wednesday Oct 7 missing: Thursday gets nothing from Tuesday, Friday gets Thursday's pivots.
+  let J = jour(sans('2026-10-07'));
+  assert.deepEqual(Array.from(J, p => p.debut + ':' + !!p.niv).slice(1, 4), ['2026-10-06:true', '2026-10-08:false', '2026-10-09:true'], 'mercredi manquant : rien jeudi');
+  // Monday after a weekend is contiguous; Monday after a missing Friday is not.
+  J = jour(sans('2026-10-09'));
+  assert.equal(J.find(p => p.debut === '2026-10-12').niv, null, 'vendredi manquant : rien lundi');
+  assert.ok(jour(B).find(p => p.debut === '2026-10-12').niv, 'week-end : lundi garde ses pivots');
+  // Footprint bars carry no _date; TT puts the session date in _sd, which is enough to see the gap.
+  const fp = sans('2026-10-07').map(b => { const c = Object.assign({ _sd: b._date }, b); delete c._date; return c; });
+  J = jour(fp);
+  assert.deepEqual(Array.from(J, p => !!p.niv).slice(1, 4), [true, false, true], 'footprint : mercredi manquant vu par _sd');
+  assert.equal(E.calcul(Object.assign(g(fp), { sym: 'MQF2' }), defaut).sem.length, 0, 'footprint : toujours ni semaine ni mois');
+  // TT's filler block for a missing day: bars dated that day, m 0, _trou, no levels.
+  const trou = B.filter(b => b._date < '2026-10-07').concat(Array.from({ length: 8 }, () => ({ _trou: true, _date: '2026-10-07', m: 0, o: 7000, h: 7000, l: 7000, c: 7000, lv: [] })), B.filter(b => b._date > '2026-10-07'));
+  J = jour(trou);
+  assert.deepEqual(Array.from(J, p => p.debut + ':' + !!p.niv).slice(2, 4), ['2026-10-07:true', '2026-10-08:false'], 'bloc de comblement : rien le lendemain');
+  // Weeks: one complete (Oct 5-9), the next one short of a day, mid-week, Friday or Monday.
+  const S = synth(jours('2026-10-05', '2026-10-30')), sem = bs => Array.from(E.calcul(Object.assign(g(bs), { sym: 'SM' + nc++ }), defaut).sem, p => p.cle + ':' + !!p.niv);
+  assert.deepEqual(sem(S), ['2026-41:false', '2026-42:true', '2026-43:true', '2026-44:true'], 'semaines pleines');
+  for (const manque of ['2026-10-14', '2026-10-16', '2026-10-12'])
+    assert.deepEqual(sem(S.filter(b => b._date !== manque)), ['2026-41:false', '2026-42:true', '2026-43:false', '2026-44:true'], 'semaine 42 sans le ' + manque + ' : rien pour la 43');
+  assert.deepEqual([sem(B), sem(trou)], [['2026-41:false', '2026-42:true'], ['2026-41:false', '2026-42:false']], 'semaine avec un bloc de comblement : rien pour la suivante');
+  // Months: September complete gives October its pivots, unless a September weekday is missing.
+  const M = synth(jours('2026-09-01', '2026-10-09')), mois = bs => E.calcul(Object.assign(g(bs), { sym: 'MO' + nc++ }), defaut).mois[1].niv;
+  assert.ok(mois(M), 'septembre complet');
+  assert.equal(mois(M.filter(b => b._date !== '2026-09-15')), null, 'septembre sans le 15 : rien en octobre');
+  assert.equal(mois(M.filter(b => b._date !== '2026-09-30')), null, 'septembre sans son dernier jour : rien en octobre');
+  // A full CME closure (Good Friday 2026-04-03, TT's calendar) is no missing day: Monday keeps Thursday's pivots,
+  // the short week and April without it are complete.
+  assert.deepEqual([E.outils.ouvres('mois', '2026-04-10'), E.outils.ouvres('sem', '2026-04-01'), E.outils.ouvres('sem', '2027-12-22'), E.outils.ouvresEntre('2026-04-02', '2026-04-06')], [21, 4, 4, 0], 'fermetures du CME');
+  const P = jours('2026-03-30', '2026-05-08').filter(d => d !== '2026-04-03');
+  assert.ok(jour(minutes(P.slice(0, 6))).find(p => p.debut === '2026-04-06').niv, 'lundi après le Vendredi saint : pivots du jeudi');
+  assert.ok(sem(synth(P.slice(0, 10))).includes('2026-15:true'), 'semaine du Vendredi saint complète');
+  const MG = E.calcul(Object.assign(g(synth(P)), { sym: 'GF' }), defaut).mois;
+  assert.ok(MG[1].niv === null && MG[2].cle === '2026-05' && MG[2].niv, 'mars partiel : rien en avril ; avril sans le Vendredi saint complet : pivots de mai');
 }

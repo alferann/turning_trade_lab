@@ -2,7 +2,7 @@
 
 *English version below.*
 
-> **Avertissement.** Cette étude est un outil en évolution permanente : elle n'est pas parfaite, ses valeurs dépendent des barres chargées dans le graphe. Elle ne remplace en aucun cas votre propre jugement ni votre lecture visuelle du graphe. Elle propose, vous décidez.
+> **Avertissement.** Cette étude est un outil en évolution permanente : elle n'est pas parfaite, ses valeurs dépendent des barres chargées dans le graphe, et elle masque une session que le graphe n'a pas en entier plutôt que de la tracer fausse. Elle ne remplace en aucun cas votre propre jugement ni votre lecture visuelle du graphe. Elle propose, vous décidez.
 
 ## En deux mots
 
@@ -30,6 +30,7 @@ Ce que ça change pour la décision : des cibles et des zones de réaction connu
 - **Un trait par niveau**, dans la couleur de sa session dans Turning Trade, depuis la barre de l'extrême jusqu'à la barre qui l'a pris, ou jusqu'au bord droit s'il est encore vierge (ou avec le réglage « Bord droit »).
 - **Étiquettes** au début du trait, collées au bord gauche quand le trait commence hors écran, ou au bout du trait selon le réglage : `Tokyo H`, `Londres L`… (`H` pour le haut au-dessus du trait, `L` pour le bas au-dessous).
 - Seule la dernière occurrence close de chaque session est tracée : pendant la séance de New York, le New York tracé est celui de la veille. La session en cours ne compte qu'une fois close, à l'arrivée de la première barre de la suivante.
+- **Rien n'est tracé sur des données manquantes.** Une session dont le graphe n'a pas toutes les barres n'est pas tracée : prise en cours (le graphe commence après son ouverture), coupée avant sa fin, trouée (plus de 10 minutes sans barre au-delà de la durée d'une barre, le seuil des marques « sans donnée » de Turning Trade ; une heure sur les graphes en ticks, en volume ou en range) ou contenant des barres de comblement. Une session plus ancienne ne prend pas sa place : si la dernière occurrence d'une session manque (séance coupée avant elle, jour ouvré absent du graphe), la précédente n'est plus la dernière et n'est pas tracée non plus. Les niveaux reviennent avec la prochaine occurrence complète.
 
 ## Configurer
 
@@ -50,7 +51,8 @@ Les bornes, les noms et les couleurs se changent dans Turning Trade : menu du gr
 
 - **Une notification par graphe.** Chaque graphe qui porte l'étude avec les notifications allumées sonne de son côté : deux graphes ES, deux notifications.
 - La session de la dernière barre n'est close qu'à l'arrivée d'une barre de la suivante : pendant la pause de 17:00 à 18:00, la clôture du jour reste en cours et l'étude montre encore celle de la veille.
-- Le footprint ne charge pas le module des sessions de Turning Trade ni ne date ses barres : il prend les bornes par défaut, avec les changements d'heure de la date du jour, et ne suit pas les réglages du panneau Sessions du monde.
+- Le footprint ne charge pas le module des sessions de Turning Trade ni ne date ses barres : il prend les bornes par défaut, avec les changements d'heure de la date du jour, et ne suit pas les réglages du panneau Sessions du monde. Sans dates, il voit une session prise en cours, coupée ou trouée, mais pas un jour ouvré entier absent.
+- Les fermetures complètes du CME (Jour de l'An, Vendredi saint, Noël, reports compris) viennent du calendrier de Turning Trade et ne comptent pas comme des jours manquants ; les fériés à séance écourtée gardent leur séance. Une séance écourtée reste une séance incomplète : ses sessions coupées sont masquées jusqu'à leur prochaine occurrence complète.
 - Sur les graphes en ticks, en volume ou en range, une barre appartient à la session de son début, faute de durée.
 - Un graphe RTH ne contient que New York : seuls ses niveaux y sont tracés.
 - Le premier calcul sur un long historique s'étale sur quelques images (4 ms par image) : les traits apparaissent une fraction de seconde après l'ouverture du graphe.
@@ -59,7 +61,7 @@ Les bornes, les noms et les couleurs se changent dans Turning Trade : menu du gr
 
 # Previous Session Highs and Lows · getting started
 
-> **Disclaimer.** This study is a work in constant progress: it is not perfect, its values depend on the bars loaded in the chart. It never replaces your own judgment or your visual reading of the chart. It suggests, you decide.
+> **Disclaimer.** This study is a work in constant progress: it is not perfect, its values depend on the bars loaded in the chart, and it hides a session the chart does not hold in full rather than draw it wrong. It never replaces your own judgment or your visual reading of the chart. It suggests, you decide.
 
 ## In short
 
@@ -87,6 +89,7 @@ What it changes for the decision: targets and reaction zones known in advance, a
 - **One line per level**, in its session's colour in Turning Trade, from the bar of the extreme to the bar that took it, or to the right edge if it is still untouched (or with the "Right edge" setting).
 - **Labels** at the start of the line, stuck to the left edge when the line starts off screen, or at its end per the setting: `Tokyo H`, `London L`… (`H` for the high, above the line, `L` for the low, below it).
 - Only the last closed occurrence of each session is drawn: during the New York session, the New York shown is the previous day's. The current session only counts once closed, when the first bar of the next one arrives.
+- **Nothing is drawn from missing data.** A session the chart does not hold every bar of is not drawn: joined late (the chart starts after its open), cut before its end, holed (more than 10 minutes without a bar beyond one bar's duration, the threshold of Turning Trade's "no data" marks; one hour on tick, volume or range charts) or holding filler bars. An older session does not take its place: if the last occurrence of a session is missing (session cut before it, business day absent from the chart), the one before is no longer the last and is not drawn either. The levels come back with the next complete occurrence.
 
 ## Settings
 
@@ -109,7 +112,8 @@ Bounds, names and colours are changed in Turning Trade: chart menu, World sessio
 
 - **One notification per chart.** Each chart carrying the study with notifications on rings on its own: two ES charts, two notifications.
 - The session of the last bar only closes when a bar of the next one arrives: during the 17:00 to 18:00 break, the day's close session is still in progress and the study still shows the previous day's.
-- The footprint neither loads Turning Trade's session module nor dates its bars: it uses the default bounds, with today's clock changes, and does not follow the World sessions panel.
+- The footprint neither loads Turning Trade's session module nor dates its bars: it uses the default bounds, with today's clock changes, and does not follow the World sessions panel. Without dates it sees a session joined late, cut or holed, but not a whole missing business day.
+- Full CME closures (New Year's Day, Good Friday, Christmas, observed days included) come from Turning Trade's calendar and do not count as missing days; holidays with a shortened session keep their session. A shortened session is still an incomplete one: its cut sessions are hidden until their next complete occurrence.
 - On tick, volume or range charts, a bar belongs to the session of its start, having no duration.
 - An RTH chart only holds New York: only its levels are drawn there.
 - The first computation over a long history spreads over a few frames (4 ms per frame): the lines show a fraction of a second after the chart opens.

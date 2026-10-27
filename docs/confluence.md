@@ -65,7 +65,7 @@ Ce que ça change pour la décision : une zone à score élevé est un endroit o
 
 ### Limites à connaître
 
-- Un niveau masqué n'est pas une erreur : la donnée manque (graphe en ticks qui ne remonte qu'à deux semaines, séance tronquée, jour non racheté). Les jours fériés ne sont pas connus : le lendemain d'un férié, la veille passe pour manquante, et une semaine ouverte un mardi après un lundi férié passe pour incomplète.
+- Un niveau masqué n'est pas une erreur : la donnée manque (graphe en ticks qui ne remonte qu'à deux semaines, séance tronquée, jour non racheté). Les fermetures complètes du CME (Jour de l'An, Vendredi saint, Noël, reports compris) viennent du calendrier de Turning Trade et ne comptent pas comme des jours manquants ; les fériés à séance écourtée gardent leur séance.
 - Un trou sans barre de comblement au milieu d'une séance, comme sur le footprint, ne se voit pas.
 - La largeur se règle en ticks : 6 ticks font 1,5 point sur ES et NQ. Un instrument plus large demande une largeur plus grande.
 - Sur un graphe RTH, il n'y a ni overnight, ni `Open0h`, ni `OpenETH`, le graphe commence à 09h30.
@@ -139,7 +139,7 @@ What it changes for a decision: a high-score zone is a place to expect a reactio
 
 ### Known limits
 
-- A masked level is not a bug: the data is missing (a tick chart going back only two weeks, a cut session, a day not bought back). Holidays are not known: the day after a holiday, the previous session counts as missing, and a week opening on a Tuesday after a Monday holiday counts as incomplete.
+- A masked level is not a bug: the data is missing (a tick chart going back only two weeks, a cut session, a day not bought back). Full CME closures (New Year's Day, Good Friday, Christmas, observed days included) come from Turning Trade's calendar and do not count as missing days; holidays with a shortened session keep their session.
 - A gap without filler bars in the middle of a session, as on the footprint, goes unseen.
 - Width is set in ticks: 6 ticks are 1.5 points on ES and NQ. A wider instrument needs a wider setting.
 - On an RTH chart there is no overnight, no `Open0h`, no `OpenETH`, the chart starts at 09:30.
