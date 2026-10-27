@@ -43,7 +43,7 @@ Ce que ça change pour la décision : des cibles et des zones de réaction connu
 | Opacité | Opacité des traits et des étiquettes, de 0,05 à 1 | 0,85 |
 | Étiquettes | Nom de la session et H ou L au bout des traits | cochée |
 
-Les bornes, les noms et les couleurs se changent dans Turning Trade : menu du graphe, Sessions du monde. Une session éteinte là-bas disparaît aussi de l'étude, et la précédente court jusqu'à la suivante encore active.
+Les bornes, les noms et les couleurs se changent dans Turning Trade : menu du graphe, Sessions du monde. Les cases « Compter cette session » de ce panneau n'y changent rien : l'étude prend toujours les quatre sessions, et seules ses propres cases choisissent celles qu'elle affiche. Pas besoin non plus d'afficher les bandes de session sur le graphe.
 
 ### Limites connues
 
@@ -101,7 +101,7 @@ Labels below are those shown when Turning Trade is set to English.
 | Opacity | Opacity of lines and labels, from 0.05 to 1 | 0.85 |
 | Labels | Session name and H or L at the end of the lines | checked |
 
-Bounds, names and colours are changed in Turning Trade: chart menu, World sessions. A session turned off there also disappears from the study, and the previous one runs until the next active one.
+Bounds, names and colours are changed in Turning Trade: chart menu, World sessions. The panel's "Count this session" boxes make no difference: the study always takes all four sessions, and only its own boxes choose which ones it shows. Session bands do not need to be shown on the chart either.
 
 ### Known limits
 
