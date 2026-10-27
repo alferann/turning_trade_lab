@@ -264,6 +264,12 @@ const fin = (C, B, f) => C.vwap[B.findLastIndex(f)];
   const D = aplat([RS[0], RS[3]]), U = aplat([RS[0], RS[2]]);
   traces(A.calcul(g(D), W), D, b => b._date === '2026-11-02', 'mardi et mercredi sans séance : semaine masquée');
   traces(A.calcul(g(U), W), U, () => true, 'mardi sans séance : férié, semaine tracée');
+  // A holiday early close at 13:15 ET (last bar m 1154) is a whole session: the week goes on, in the chart as from the file.
+  const H = aplat([RS[0], coupe(RS[1], b => b.m < 1155), RS[2]]);
+  traces(A.calcul(g(H), W), H, () => true, 'clôture anticipée à 13:15 : semaine tracée');
+  FICHIERS['_footprint_eth_H1.json'] = { sessions: [RS[0], coupe(RS[1], b => b.m < 1155)] };
+  const TH = ticks(aplat([RS[2]]), 'H1'); A.calcul(TH, W); await servir();
+  traces(A.calcul(TH, W), aplat([RS[2]]), () => true, 'clôture anticipée dans le fichier : semaine complétée');
 }
 
 // 6. Incremental cache: one more bar extends the sums instead of recomputing, same result as from scratch.
