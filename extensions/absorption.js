@@ -26,6 +26,10 @@
 // Barres closes seulement : la barre en formation n'est jamais jugee, donc
 // rien ne se repeint ni ne sonne deux fois. Un seul calcul incremental,
 // partage par les deux etudes.
+//
+// Rien ne tient a travers des donnees manquantes : le bloc dont TT comble un
+// jour absent, ou un jour ouvre manquant entre deux seances, arrete les zones
+// encore ouvertes et les fenetres de reprise, et oublie les niveaux en test.
 (function(){
 
 // ponytail: cloture repliee d'au moins un quart du range pour le volume piege a l'extreme.
@@ -88,6 +92,21 @@ anglais(EN);
 // Textes du canevas et des notifications, que HFQI18n ne voit pas.
 function tr(s){ return typeof HFQI18n !== 'undefined' && HFQI18n.t ? HFQI18n.t(s) : s; }
 function maintenant(){ return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now(); }
+
+// Date AAAA-MM-JJ en millisecondes UTC, null si la cle n'est pas une date.
+function jour(cle){
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(cle);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null;
+}
+
+// Jours de semaine strictement entre deux dates : une seance manque entre elles.
+// ponytail: les feries comptent ; le lendemain d'un ferie, les zones de la veille s'arretent.
+function ouvresEntre(a, b){
+  var d = jour(a), f = jour(b), n = 0;
+  if(d === null || f === null) return 0;
+  for(d += 864e5; d < f; d += 864e5) if(new Date(d).getUTCDay() % 6) n++;
+  return n;
+}
 
 // Rang d'insertion dans un tableau trie.
 function place(a, v){
@@ -179,7 +198,7 @@ function teste(S, i, s, p, v, r, seuil, tol, tick){
 var S = null;
 function neuf(sig, r){
   var W = Math.max(10, r.memoire | 0);
-  return {sig:sig, n:0, sceau:'', F:[], m:[], s0:0, ev:[], cand:[], fD:fenetre(W), fX:fenetre(2 * W), fR:fenetre(W)};
+  return {sig:sig, n:0, sceau:'', F:[], m:[], s0:0, ev:[], cand:[], trou:[], date:'', fD:fenetre(W), fX:fenetre(2 * W), fR:fenetre(W)};
 }
 function sceauDe(b){ return b ? b.m + ':' + b.o + ':' + b.c : ''; }
 
@@ -188,6 +207,11 @@ function avance(S, g, i, r, tick){
   var f = b && !b._trou ? mesure(g.niveaux(i), b, Z, tick) : null;
   S.m[i] = b ? +b.m : NaN;
   if(i && S.m[i] < S.m[i - 1]) S.s0 = i;
+  // Trou : barre de comblement, ou premiere barre d'une seance apres un jour
+  // ouvre manquant (date `_date`, ou `_sd` que le footprint pose sans dater).
+  var d = b ? String(b._date || b._sd || '').slice(0, 10) : '';
+  if(b && (b._trou || (d && S.date && d !== S.date && ouvresEntre(S.date, d)))){ S.trou[i] = true; S.cand = []; }
+  if(d) S.date = d;
   S.sceau = sceauDe(b);
   S.F[i] = f;
   if(!f) return;
@@ -253,14 +277,15 @@ function barreDe(S, N, mF, t){
   return lo;
 }
 
-// Avance chaque absorption encore valide jusqu'a la derniere barre close.
-function suivre(L, F, n, tick){
+// Avance chaque absorption encore valide jusqu'a la derniere barre close. Un
+// trou l'arrete aussi : on ne sait pas si une cloture l'a traversee pendant.
+function suivre(L, F, trou, n, tick){
   for(var k = 0; k < L.length; k++){
     var e = L[k];
     if(e.i < 0 || e.fin >= 0) continue;
     for(var j = e.vu + 1; j < n && e.fin < 0; j++){
       var f = F[j];
-      if(f && (e.s > 0 ? f.c < e.bas - tick / 2 : f.c > e.haut + tick / 2)) e.fin = j;
+      if(trou[j] || (f && (e.s > 0 ? f.c < e.bas - tick / 2 : f.c > e.haut + tick / 2))) e.fin = j;
     }
     if(n - 1 > e.vu) e.vu = n - 1;
   }
@@ -290,8 +315,8 @@ function calcul(g, r){
     if(S.n === fin) T.ev.forEach(function(e){ if(e.i < 0 && (e.i = barreDe(S, N, mF, e.t)) >= 0) e.vu = e.i; });
     tape = T.ev; lu = T.lu / P.n;
   }
-  suivre(S.ev, S.F, S.n, tick);
-  suivre(tape, S.F, S.n, tick);
+  suivre(S.ev, S.F, S.trou, S.n, tick);
+  suivre(tape, S.F, S.trou, S.n, tick);
   var pret = S.n === fin && lu === 1;
   if(!pret) redessiner();
   return {ev:S.ev, tape:tape, F:S.F, n:S.n, lu:lu, pret:pret};

@@ -268,4 +268,36 @@ function ruban(T) {
   }
 }
 
-console.log('OK synthétiques : signatures, zones, reprises, notifications');
+// 10. Missing data: nothing holds through bars the chart does not have. TT's filler block for a
+// missing day, or a missing weekday between two sessions (tick chart, footprint through _sd), ends
+// the zones still open, drops the levels being tested and closes the resumption windows.
+{
+  const comble = n => Array.from({ length: n }, () => ({ _trou: true, m: 0, o: 5000, h: 5000, l: 5000, c: 5000, v: 0, lv: [] }));
+  const piege = () => barre(5000, 3, 1, [[10, 10], [50, 10], [150, 10], [10, 100], [10, 100]]);
+  const test = () => barre(5000, 1, 4, [[35, 10], [35, 10], [10, 30], [10, 20], [10, 12]]);
+  const date = (B, d, cle = '_date') => B.map(b => Object.assign({}, b, { [cle]: d }));
+  const zone = B => { ({ abs, rep } = charger()); return Array.from(complet(g(B), RA()).ev, vue); };
+  // The bearish zone of section 1 stays open over plain bars, ends at the first filler bar.
+  mn = 0;
+  const avant = fond(120).concat([piege()], fond(3)), apres = fond(5).concat([forme(5000)]);
+  assert.deepEqual(zone(avant.concat(apres)).map(e => e.fin), [-1], 'zone ouverte sans trou');
+  assert.deepEqual(zone(avant.concat(comble(8), apres)).map(e => [e.i, e.fin]), [[120, 124]], 'zone arrêtée au bloc de comblement');
+  // Missing Wednesday between two dated sessions, no filler: the zone ends at the next session's first bar.
+  assert.deepEqual(zone(date(avant, '2026-10-06').concat(date(apres, '2026-10-08'))).map(e => e.fin), [124], 'mercredi manquant');
+  assert.deepEqual(zone(date(avant, '2026-10-06', '_sd').concat(date(apres, '2026-10-08', '_sd'))).map(e => e.fin), [124], 'footprint : mercredi manquant vu par _sd');
+  assert.deepEqual(zone(date(avant, '2026-10-09').concat(date(apres, '2026-10-12'))).map(e => e.fin), [-1], 'week-end : la zone tient');
+  // Level defended: two tests before the gap and one after are not three tests.
+  mn = 0;
+  const niv = fond(120).concat([test(), hausse(5000), test()]), fin = [test(), forme(5000)];
+  assert.deepEqual(zone(niv.concat([hausse(5000)], fin)).map(e => e.tags), ['niv'], 'trois tests d\'affilée');
+  assert.deepEqual(zone(niv.concat(comble(8), fin)).filter(e => e.tags === 'niv'), [], 'tests de part et d\'autre d\'un trou');
+  // Resumption: the window of the effort absorption of section 5 closes at the gap.
+  mn = 0;
+  const abso = barre(5000, 1, 3, [[40, 20], [60, 20], [40, 20], [40, 20], [40, 20]]);
+  const fort = barre(5000.5, 0, 4, [[10, 25], [10, 25], [10, 25], [10, 25], [10, 25]]);
+  const reprise = suite => { ({ abs, rep } = charger()); return rep.calcul(g(fond(120).concat([abso], suite, [forme(5001)])), RA(), RR()).ev.find(e => e.i === 120).rep; };
+  assert.equal(reprise([hausse(5000), fort]), 122, 'reprise sans trou');
+  assert.equal(reprise(comble(8).concat([fort])), -1, 'pas de reprise par-dessus un trou');
+}
+
+console.log('OK synthétiques : signatures, zones, reprises, notifications, données manquantes');
