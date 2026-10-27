@@ -52,7 +52,7 @@ Les bornes, les noms et les couleurs se changent dans Turning Trade : menu du gr
 - **Une notification par graphe.** Chaque graphe qui porte l'étude avec les notifications allumées sonne de son côté : deux graphes ES, deux notifications.
 - La session de la dernière barre n'est close qu'à l'arrivée d'une barre de la suivante : pendant la pause de 17:00 à 18:00, la clôture du jour reste en cours et l'étude montre encore celle de la veille.
 - Le footprint ne charge pas le module des sessions de Turning Trade ni ne date ses barres : il prend les bornes par défaut, avec les changements d'heure de la date du jour, et ne suit pas les réglages du panneau Sessions du monde. Sans dates, il voit une session prise en cours, coupée ou trouée, mais pas un jour ouvré entier absent.
-- Les jours fériés passent pour des données manquantes : une séance écourtée ou un jour sans séance masque les sessions concernées jusqu'à leur prochaine occurrence complète.
+- Les fermetures complètes du CME (Jour de l'An, Vendredi saint, Noël, reports compris) viennent du calendrier de Turning Trade et ne comptent pas comme des jours manquants ; les fériés à séance écourtée gardent leur séance. Une séance écourtée reste une séance incomplète : ses sessions coupées sont masquées jusqu'à leur prochaine occurrence complète.
 - Sur les graphes en ticks, en volume ou en range, une barre appartient à la session de son début, faute de durée.
 - Un graphe RTH ne contient que New York : seuls ses niveaux y sont tracés.
 - Le premier calcul sur un long historique s'étale sur quelques images (4 ms par image) : les traits apparaissent une fraction de seconde après l'ouverture du graphe.
@@ -113,7 +113,7 @@ Bounds, names and colours are changed in Turning Trade: chart menu, World sessio
 - **One notification per chart.** Each chart carrying the study with notifications on rings on its own: two ES charts, two notifications.
 - The session of the last bar only closes when a bar of the next one arrives: during the 17:00 to 18:00 break, the day's close session is still in progress and the study still shows the previous day's.
 - The footprint neither loads Turning Trade's session module nor dates its bars: it uses the default bounds, with today's clock changes, and does not follow the World sessions panel. Without dates it sees a session joined late, cut or holed, but not a whole missing business day.
-- Holidays pass for missing data: a shortened session or a day without a session hides the sessions concerned until their next complete occurrence.
+- Full CME closures (New Year's Day, Good Friday, Christmas, observed days included) come from Turning Trade's calendar and do not count as missing days; holidays with a shortened session keep their session. A shortened session is still an incomplete one: its cut sessions are hidden until their next complete occurrence.
 - On tick, volume or range charts, a bar belongs to the session of its start, having no duration.
 - An RTH chart only holds New York: only its levels are drawn there.
 - The first computation over a long history spreads over a few frames (4 ms per frame): the lines show a fraction of a second after the chart opens.

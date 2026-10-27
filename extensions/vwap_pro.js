@@ -185,22 +185,33 @@ function semaine(cle){
 // Cle de la semaine ISO ou du mois d'une date de seance.
 function periode(anc, date){ return anc === 'sem' ? 's' + semaine(date) : 'm' + date.slice(0, 7); }
 
-// Vrai si la date est le premier jour ouvre de sa semaine (lundi) ou de son mois.
-// ponytail: les feries sont ignores ; une periode ouverte par un ferie passe pour incomplete, donc masquee.
+// Jours de fermeture complete du CME (Jour de l'An, Vendredi saint, Noel,
+// reports compris), lus dans le calendrier de TT (HFQSessions.feriesUS) ; les
+// seances ecourtees restent ouvrees. Sans ce calendrier, tout jour de semaine l'est.
+var FERMES = {};
+function ouvre(ms){
+  var d = new Date(ms), an = d.getUTCFullYear();
+  if(!(d.getUTCDay() % 6)) return false;
+  if(!FERMES[an]){
+    FERMES[an] = {};
+    try{ HFQSessions.feriesUS(an).forEach(function(f){ if(f.type === 'ferme') FERMES[an][f.date] = 1; }); }catch(_){}
+  }
+  return !FERMES[an][d.toISOString().slice(0, 10)];
+}
+
+// Vrai si la date est le premier jour ouvre de sa semaine ou de son mois.
 function premierOuvre(anc, date){
   var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(date);
   if(!m) return false;
-  var jour = function(k){ return new Date(Date.UTC(+m[1], +m[2] - 1, k)).getUTCDay(); };
-  if(anc === 'sem') return jour(+m[3]) === 1;
-  for(var k = 1; k < +m[3]; k++) if(jour(k) % 6) return false;
+  var t = Date.UTC(+m[1], +m[2] - 1, +m[3]), d = anc === 'sem' ? t - ((new Date(t).getUTCDay() + 6) % 7) * 864e5 : Date.UTC(+m[1], +m[2] - 1, 1);
+  for(; d < t; d += 864e5) if(ouvre(d)) return false;
   return true;
 }
 
-// Jours ouvres strictement entre deux dates AAAA-MM-JJ.
-// ponytail: les feries sont ignores ; un seul jour ouvre sans seance passe pour un ferie, deux font un trou.
+// Jours ouvres strictement entre deux dates AAAA-MM-JJ : autant de seances manquantes.
 function manquent(a, b){
   var n = 0;
-  for(var d = Date.parse(a) + 864e5, f = Date.parse(b); d < f; d += 864e5) if(new Date(d).getUTCDay() % 6) n++;
+  for(var d = Date.parse(a) + 864e5, f = Date.parse(b); d < f; d += 864e5) if(ouvre(d)) n++;
   return n;
 }
 
@@ -259,7 +270,7 @@ function amorce(C, g, r, b0, sig){
     if(!B.length || d > date0 || (!cal && d !== date0)) continue;
     // Une seance d'avant la periode : son debut est dans le fichier.
     if(cal && periode(anc, d) !== A.cle){ debut = true; prec = d; continue; }
-    if(prec && manquent(prec, d) > 1) ok = false;
+    if(prec && manquent(prec, d) > 0) ok = false;
     if(!vu){ vu = true; debut = debut || premierOuvre(anc, d); }
     var fin = d < date0 ? Infinity : m0, e0 = null, e1 = null;
     for(var j = 0; j < B.length; j++){
@@ -273,7 +284,7 @@ function amorce(C, g, r, b0, sig){
     if(d < date0 || besoin) ok = ok && e0 !== null && ecart(anc, F, '', e0, dur) < DEBUT_MAX && (d < date0 ? e1 >= dur - FIN_MAX : e1 + 1 >= m0 - DEBUT_MAX);
     prec = d;
   }
-  A.ok = debut && ok && prec !== null && (prec === date0 || (!besoin && manquent(prec, date0) <= 1));
+  A.ok = debut && ok && prec !== null && (prec === date0 || (!besoin && !manquent(prec, date0)));
   C.amo = {k:k, A:A};
   return A;
 }
@@ -348,7 +359,7 @@ function calcul(C, g, r, fin){
     // ponytail: seule la premiere periode du graphe se complete par le fichier minute ; plus loin, une seance entamee en retard (jour partiel d'un graphe en ticks) est masquee, et un trou au milieu d'une seance sans barre de comblement passe inapercu.
     var ok = !!cle && !b._trou;
     if(ok && !suite) ok = ecart(r.anc, F, date, +b.m, dur) < DEBUT_MAX || (A0 === A && A.ok);
-    else if(ok) ok = C.ok[i - 1] === 1 && (C.sessAt[i - 1] === sess || (+prev.m >= dur - FIN_MAX && +b.m < DEBUT_MAX && manquent(String(prev._date).slice(0, 10), date) <= 1));
+    else if(ok) ok = C.ok[i - 1] === 1 && (C.sessAt[i - 1] === sess || (+prev.m >= dur - FIN_MAX && +b.m < DEBUT_MAX && !manquent(String(prev._date).slice(0, 10), date)));
     C.ok[i] = ok ? 1 : 0;
     if(ok && C.V[i] > 0){
       var vw = C.PV[i] / C.V[i];

@@ -125,14 +125,26 @@ function redessiner(){
 // Prix d'un tick, avec les decimales du pas de cotation.
 function prix(v, t){ return (v * t).toFixed((String(t).split('.')[1] || '').length); }
 
-// Vrai si la date est le premier jour ouvre de sa semaine (lundi) ou de son mois.
-// ponytail: les feries sont ignores ; une periode ouverte par un ferie passe pour partielle.
+// Jours de fermeture complete du CME (Jour de l'An, Vendredi saint, Noel,
+// reports compris), lus dans le calendrier de TT (HFQSessions.feriesUS) ; les
+// seances ecourtees restent ouvrees. Sans ce calendrier, tout jour de semaine l'est.
+var FERMES = {};
+function ouvre(ms){
+  var d = new Date(ms), an = d.getUTCFullYear();
+  if(!(d.getUTCDay() % 6)) return false;
+  if(!FERMES[an]){
+    FERMES[an] = {};
+    try{ HFQSessions.feriesUS(an).forEach(function(f){ if(f.type === 'ferme') FERMES[an][f.date] = 1; }); }catch(_){}
+  }
+  return !FERMES[an][d.toISOString().slice(0, 10)];
+}
+
+// Vrai si la date est le premier jour ouvre de sa semaine ou de son mois.
 function premierOuvre(T, date){
   var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(date);
   if(!m) return false;
-  var jour = function(k){ return new Date(Date.UTC(+m[1], +m[2] - 1, k)).getUTCDay(); };
-  if(T === 'sem') return jour(+m[3]) === 1;
-  for(var k = 1; k < +m[3]; k++) if(jour(k) % 6) return false;
+  var t = Date.UTC(+m[1], +m[2] - 1, +m[3]), d = T === 'sem' ? t - ((new Date(t).getUTCDay() + 6) % 7) * 864e5 : Date.UTC(+m[1], +m[2] - 1, 1);
+  for(; d < t; d += 864e5) if(ouvre(d)) return false;
   return true;
 }
 
@@ -200,11 +212,10 @@ function debut(n, lire, f){
 // Une fenetre qui enjambe l'ouverture du graphe a commence dans la seance
 // precedente : Infinity si le marche y traitait, sinon depuis l'ouverture.
 function ecart(f, m, dur){ return !f ? m : m >= f[0] ? m - f[0] : f[0] >= dur ? m : Infinity; }
-// Jours ouvres strictement entre deux dates AAAA-MM-JJ.
-// ponytail: les feries sont ignores ; un seul jour ouvre sans seance passe pour un ferie, deux font un trou.
+// Jours ouvres strictement entre deux dates AAAA-MM-JJ : autant de seances manquantes.
 function manquent(a, b){
   var n = 0;
-  for(var d = Date.parse(a) + 864e5, f = Date.parse(b); d < f; d += 864e5) if(new Date(d).getUTCDay() % 6) n++;
+  for(var d = Date.parse(a) + 864e5, f = Date.parse(b); d < f; d += 864e5) if(ouvre(d)) n++;
   return n;
 }
 
@@ -328,7 +339,7 @@ function amorce(C, g, r, J, p){
     if(!B.length || d > date0 || (!cal && d !== date0)) continue;
     // Une seance d'avant la periode : son debut est dans le fichier.
     if(cal && cleDe(d) !== cleDe(date0)){ ouvert = true; prec = d; continue; }
-    if(prec && manquent(prec, d) > 1) ok = false;
+    if(prec && manquent(prec, d) > 0) ok = false;
     if(!vu){ vu = true; ouvert = ouvert || premierOuvre(T, d); }
     for(var j = 0; j < B.length; j++){
       var b = B[j], lv = b.lv || [];
@@ -350,7 +361,7 @@ function amorce(C, g, r, J, p){
     if(d < date0 || besoin) ok = ok && e0 !== null && ecart(f, e0, dur) < DEBUT_MAX && (d < date0 ? e1 >= z : e1 + 1 >= m0 - DEBUT_MAX);
     prec = d;
   }
-  A.ok = ouvert && ok && prec !== null && (prec === date0 || (!besoin && manquent(prec, date0) <= 1));
+  A.ok = ouvert && ok && prec !== null && (prec === date0 || (!besoin && !manquent(prec, date0)));
   C.amo = {k:k, A:A};
   return A;
 }
@@ -373,7 +384,7 @@ function manque(C, g, r, J, p, Hs, A){
     var s = J[k], H = Hs[k - p.k0], f = fenetre(C, g, r, J, k);
     var entame = H.m0 !== null && ecart(f, H.m0, dur) < DEBUT_MAX;
     if(k === p.k0) entame = (A && A.ok) || (entame && (!cal || premierOuvre(r.periode, s.date)));
-    else entame = entame && manquent(J[k - 1].date, s.date) <= 1;
+    else entame = entame && !manquent(J[k - 1].date, s.date);
     var close = k < J.length - 1 || (f && s.m1 >= f[1]);
     var fin = !close || (H.m1 !== null && H.m1 >= Math.min((f ? Math.min(f[1], 1440) : dur) - DEBUT_MAX, dur - FIN_MAX));
     if(!entame && k === p.k0) D.partiel = cal ? s.date : true;

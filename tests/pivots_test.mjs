@@ -9,6 +9,8 @@ import path from 'node:path';
 
 const RACINE = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const SRC = fs.readFileSync(path.join(RACINE, 'extensions/pivots.js'), 'utf8');
+// TT's market calendar (hfq-sessions.js): full CME closures (New Year, Good Friday, Christmas) are no missing day.
+const HFQSessions = (() => { const c = {}; vm.runInContext(fs.readFileSync(path.join(process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Terminal/payload', 'hfq-sessions.js'), 'utf8'), vm.createContext(c)); return c.HFQSessions; })();
 const DB = path.join(process.env.TT_DATA || path.join(process.env.HOME, '.local/share/TurningTrade'), '_footprint_db_rec_ES.json');
 
 const db = JSON.parse(fs.readFileSync(DB, 'utf8'));
@@ -17,7 +19,7 @@ for (const s of db.sessions) for (const b of s.bars) bars.push(Object.assign({ _
 const N = bars.length;
 
 const defs = [];
-vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console }));
+vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console, HFQSessions }));
 assert.equal(defs.length, 1);
 const E = defs[0];
 assert.equal(E.id, 'pivots', 'id stable');
@@ -269,4 +271,12 @@ const de = (B, f) => hlc(B.filter(f));
   assert.ok(mois(M), 'septembre complet');
   assert.equal(mois(M.filter(b => b._date !== '2026-09-15')), null, 'septembre sans le 15 : rien en octobre');
   assert.equal(mois(M.filter(b => b._date !== '2026-09-30')), null, 'septembre sans son dernier jour : rien en octobre');
+  // A full CME closure (Good Friday 2026-04-03, TT's calendar) is no missing day: Monday keeps Thursday's pivots,
+  // the short week and April without it are complete.
+  assert.deepEqual([E.outils.ouvres('mois', '2026-04-10'), E.outils.ouvres('sem', '2026-04-01'), E.outils.ouvres('sem', '2027-12-22'), E.outils.ouvresEntre('2026-04-02', '2026-04-06')], [21, 4, 4, 0], 'fermetures du CME');
+  const P = jours('2026-03-30', '2026-05-08').filter(d => d !== '2026-04-03');
+  assert.ok(jour(minutes(P.slice(0, 6))).find(p => p.debut === '2026-04-06').niv, 'lundi après le Vendredi saint : pivots du jeudi');
+  assert.ok(sem(synth(P.slice(0, 10))).includes('2026-15:true'), 'semaine du Vendredi saint complète');
+  const MG = E.calcul(Object.assign(g(synth(P)), { sym: 'GF' }), defaut).mois;
+  assert.ok(MG[1].niv === null && MG[2].cle === '2026-05' && MG[2].niv, 'mars partiel : rien en avril ; avril sans le Vendredi saint complet : pivots de mai');
 }

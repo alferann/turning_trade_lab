@@ -12,6 +12,8 @@ import path from 'node:path';
 
 const RACINE = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const SRC = fs.readFileSync(path.join(RACINE, 'extensions/niveaux_sessions.js'), 'utf8');
+// TT's market calendar (hfq-sessions.js): full CME closures (New Year, Good Friday, Christmas) are no missing day.
+const HFQSessions = (() => { const c = {}; vm.runInContext(fs.readFileSync(path.join(process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Terminal/payload', 'hfq-sessions.js'), 'utf8'), vm.createContext(c)); return c.HFQSessions; })();
 const DB = path.join(process.env.TT_DATA || path.join(process.env.HOME, '.local/share/TurningTrade'), '_footprint_db_rec_ES.json');
 const PAYLOAD = process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Terminal/payload';
 
@@ -35,7 +37,7 @@ function charge(avecTT = false) {
   const defs = [], notes = [];
   class Notification { constructor(t, o) { notes.push(t + ' | ' + o.body); } }
   Notification.permission = 'granted';
-  const vc = vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; }, redessiner() {} }, Notification, performance, console });
+  const vc = vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; }, redessiner() {} }, Notification, performance, console, HFQSessions });
   if (avecTT) for (const f of ['hfq-clock.js', 'hfq-sessions-monde.js']) vm.runInContext(fs.readFileSync(path.join(PAYLOAD, f), 'utf8'), vc);
   vm.runInContext(SRC, vc);
   assert.equal(defs.length, 1);
@@ -270,6 +272,8 @@ const lu = notes => notes.map(t => { const m = /^ES · (.+) ([HL]) \| .+ : ([\d.
   assert.deepEqual(vus(bars), ['asie', 'eu', 'fin', 'us'], 'graphe complet : les quatre sessions');
   // A weekend is no missing day: Monday's New York in progress, Friday's New York and close drawn.
   assert.deepEqual(vus(aplat(avecJour(2, b => b.filter(x => x.m < 1110), SESS.slice(0, 3)))), ['asie', 'eu', 'fin', 'us'], 'week-end');
+  // Good Friday 2026-04-03 is a full CME closure in TT's calendar, no missing day: Monday shows Thursday's levels.
+  assert.deepEqual(vus(aplat([{ date: '2026-04-02', bars: SESS[1].bars }, { date: '2026-04-06', bars: SESS[2].bars.filter(x => x.m < 1110) }])), ['asie', 'eu', 'fin', 'us'], 'Vendredi saint');
   // Joined late: the chart opens inside Tokyo; within TT's 10 minutes, Tokyo stays.
   assert.deepEqual(vus(aplat([{ date: dL, bars: SESS[L].bars.filter(x => x.m >= 100) }])), ['eu'], 'graphe ouvert en pleine session de Tokyo');
   assert.deepEqual(vus(aplat([{ date: dL, bars: SESS[L].bars.filter(x => x.m >= 5) }])), ['asie', 'eu'], 'Tokyo pris 5 minutes après l\'ouverture');

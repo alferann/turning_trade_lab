@@ -7,6 +7,8 @@ import path from 'node:path';
 
 const RACINE = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const SRC = fs.readFileSync(path.join(RACINE, 'extensions/confluence.js'), 'utf8');
+// TT's market calendar (hfq-sessions.js): full CME closures (New Year, Good Friday, Christmas) are no missing day.
+const HFQSessions = (() => { const c = {}; vm.runInContext(fs.readFileSync(path.join(process.env.TT_PAYLOAD || '/usr/lib/TurningTrade Terminal/payload', 'hfq-sessions.js'), 'utf8'), vm.createContext(c)); return c.HFQSessions; })();
 const DB = path.join(process.env.TT_DATA || path.join(process.env.HOME, '.local/share/TurningTrade'), '_footprint_db_rec_ES.json');
 
 const db = JSON.parse(fs.readFileSync(DB, 'utf8'));
@@ -25,10 +27,10 @@ const J = e => !e || !e.length ? { n: 0, prix: () => 0, bid: () => 0, ask: () =>
   : { n: e.length, prix: k => e[k][0], bid: k => e[k][1] || 0, ask: k => e[k][2] || 0 };
 
 const defs = [];
-vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console, Math, Date, String, Number, Object, Array, isNaN, isFinite, NaN, Infinity }));
+vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console, Math, Date, String, Number, Object, Array, isNaN, isFinite, NaN, Infinity, HFQSessions }));
 const def = defs[0];
 // A fresh copy of the study, with empty caches.
-const frais = () => { const d = []; vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(x) { d.push(x); return true; } }, console, Math, Date, String, Number, Object, Array, isNaN, isFinite, NaN, Infinity })); return d[0]; };
+const frais = () => { const d = []; vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(x) { d.push(x); return true; } }, console, Math, Date, String, Number, Object, Array, isNaN, isFinite, NaN, Infinity, HFQSessions })); return d[0]; };
 const defaut = Object.fromEntries(def.reglages.map(x => [x.k, x.defaut]));
 const rec = [];
 const g = (B = bars, seance = 'eth') => ({ n: B.length, premiere: B.length - 300, derniere: B.length - 1, tick, seance, sym: 'ES', tf: 1, echelle: 1, ctx: null,
@@ -187,6 +189,14 @@ const hist = (bs) => { const vol = new Map(); let sv = 0; for (const b of bs) fo
   const Rfp = frais().calcul(g(fp), defaut), nfp = Object.fromEntries(Rfp.niveaux.map(l => [l.nom, l.prix]));
   assert.ok(Math.abs(nfp.DVWAP - niv.DVWAP) < 1e-6 && nfp.PDH === niv.PDH && nfp.HOD === niv.HOD, 'footprint : séance et veille découpées par les minutes');
   absent(new Set(Object.keys(nfp)), ['wVWAP', 'wPP'], 'footprint sans dates');
+}
+
+// 11b. A full CME closure is no missing day: across Good Friday 2026-04-03 (TT's calendar), Monday keeps Thursday
+// as its previous session, the short week gives its pivots and the week from Monday its VWAP.
+{
+  const GF = aplat(['2026-03-30', '2026-03-31', '2026-04-01', '2026-04-02', '2026-04-06'].map((date, k) => ({ date, bars: R7[k % R7.length].bars })));
+  const N2 = new Set(frais().calcul(g(GF), defaut).niveaux.map(l => l.nom));
+  for (const x of ['PDH', 'PP', 'wPP', 'wVWAP']) assert.ok(N2.has(x), 'Vendredi saint : ' + x + ' présent');
 }
 
 // 12. Labels and badges are drawn once the page's frame is done, over every study drawn after this one.

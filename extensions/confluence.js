@@ -66,18 +66,33 @@ function jour(cle){
   return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null;
 }
 
-// Jours de semaine strictement entre deux dates : une seance manque entre elles.
-// ponytail: les feries comptent ; le lendemain d'un ferie, la veille passe pour manquante, donc masquee.
-function ouvresEntre(a, b){
-  var d = jour(a), f = jour(b), n = 0;
-  if(d === null || f === null) return 0;
-  for(d += 864e5; d < f; d += 864e5) if(new Date(d).getUTCDay() % 6) n++;
-  return n;
+// Jours de fermeture complete du CME (Jour de l'An, Vendredi saint, Noel,
+// reports compris), lus dans le calendrier de TT (HFQSessions.feriesUS) ; les
+// seances ecourtees restent ouvrees. Sans ce calendrier, tout jour de semaine l'est.
+var FERMES = {};
+function ouvre(ms){
+  var d = new Date(ms), an = d.getUTCFullYear();
+  if(!(d.getUTCDay() % 6)) return false;
+  if(!FERMES[an]){
+    FERMES[an] = {};
+    try{ HFQSessions.feriesUS(an).forEach(function(f){ if(f.type === 'ferme') FERMES[an][f.date] = 1; }); }catch(_){}
+  }
+  return !FERMES[an][d.toISOString().slice(0, 10)];
 }
 
-// Jour de la semaine (0 dimanche a 6 samedi), -1 sans date.
-// ponytail: les feries sont ignores ; une semaine ouverte un mardi apres un lundi ferie passe pour incomplete.
-function jourSem(cle){ var d = jour(cle); return d === null ? -1 : new Date(d).getUTCDay(); }
+// Jours ouvres dans [d, f) en millisecondes.
+function nOuvres(d, f){ var n = 0; for(; d < f; d += 864e5) if(ouvre(d)) n++; return n; }
+
+// Jours ouvres strictement entre deux dates : une seance manque entre elles.
+function ouvresEntre(a, b){
+  var d = jour(a), f = jour(b);
+  return d === null || f === null ? 0 : nOuvres(d + 864e5, f);
+}
+
+// Premier ou dernier jour ouvre de sa semaine ISO ; faux sans date.
+function lundiDe(d){ return d - ((new Date(d).getUTCDay() + 6) % 7) * 864e5; }
+function debutSemaine(cle){ var d = jour(cle); return d !== null && !nOuvres(lundiDe(d), d); }
+function finSemaine(cle){ var d = jour(cle); return d !== null && !nOuvres(d + 864e5, lundiDe(d) + 5 * 864e5); }
 
 // Semaine ISO d'une date AAAA-MM-JJ, en cle triable ; '' si la date manque.
 function semaine(cle){
@@ -212,8 +227,8 @@ function fixes(g, r, S, cur, tick){
     if(!R) continue;
     if(s !== semCur && sem && s !== sem) break;
     // Seance chargee en entier, sans jour ouvre manquant jusqu'a la suivante ;
-    // la derniere de la semaine precedente doit etre un vendredi.
-    var ok = couvre(g, S[i], 0, dur, true) && (s !== semCur && !sem ? jourSem(S[i].cle) === 5 : !ouvresEntre(S[i].cle, apres));
+    // la derniere de la semaine precedente doit etre son dernier jour ouvre.
+    var ok = couvre(g, S[i], 0, dur, true) && (s !== semCur && !sem ? finSemaine(S[i].cle) : !ouvresEntre(S[i].cle, apres));
     apres = S[i].cle;
     if(s === semCur){ som.V += R.V; som.PV += R.PV; som.PV2 += R.PV2; som.ok = som.ok && ok; debut = apres; continue; }
     sem = s;
@@ -223,8 +238,8 @@ function fixes(g, r, S, cur, tick){
     if(R.hi > hi) hi = R.hi;
     if(R.lo < lo) lo = R.lo;
   }
-  som.ok = som.ok && jourSem(debut) === 1;
-  if(r.pivH && c !== null && okPrec && jourSem(debPrec) === 1) pivots(out, 'pivH', 'w', hi, lo, c);
+  som.ok = som.ok && debutSemaine(debut);
+  if(r.pivH && c !== null && okPrec && debutSemaine(debPrec)) pivots(out, 'pivH', 'w', hi, lo, c);
   return {niveaux:out, semaine:som};
 }
 
