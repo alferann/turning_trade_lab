@@ -10,30 +10,80 @@
 // de seance, d'ouverture et balance initiale. Deux niveaux a moins de
 // `largeur` ticks tombent dans la meme zone ; le score d'une zone est son
 // nombre de niveaux. Quand le prix s'en approche, la zone s'allume.
+//
+// Rien n'est tire de donnees manquantes : un niveau dont la fenetre n'est pas
+// chargee en entier (seance prise en cours, veille tronquee ou absente,
+// semaine sans son lundi, barre de comblement) n'est pas affiche.
 (function(){
 
 // ponytail: minutes de seance sur un graphe ETH ouvert a 18:00 ET (ES, NQ).
-var RTH_M = 930, MINUIT_M = 360, H4_M = 240, TPO_M = 30;
+var RTH_M = 930, RTH_FIN = 1320, MINUIT_M = 360, H4_M = 240, TPO_M = 30;
+// ponytail: duree de la seance du graphe en minutes, 23 h en ETH et 6 h 30 en RTH (ES, NQ).
+var DUREE = {eth:1380, rth:390};
+// Une fenetre est couverte si sa premiere barre tombe dans l'heure qui suit
+// son debut et, close, si la derniere va jusqu'a 4 h de sa fin : une cloture
+// anticipee de jour ferie passe (regle de pivots.js).
+var MARGE = [60, 240];
+// Fond des textes, pour qu'ils restent lisibles sur un profil de volume.
+var FOND = 'rgba(12,14,20,0.82)';
 
 var CACHE = {cleFixe:'', fixe:null, cle:'', R:null};
 
+// Seances du graphe. Footprint : pas de _date, une seance commence quand les
+// minutes repartent en arriere.
 function seances(g){
-  var out = [], cle = null, deb = 0, n = g.n | 0;
+  var out = [], prev = null, n = g.n | 0;
   for(var i = 0; i < n; i++){
     var b = g.barre(i);
     if(!b) continue;
-    var c = String(b._date || '');
-    if(c !== cle){ if(cle !== null) out.push({cle:cle, deb:deb, fin:i - 1}); cle = c; deb = i; }
+    if(!prev || (b._date != null ? b._date !== prev._date : +b.m < +prev.m)){
+      if(out.length) out[out.length - 1].fin = i - 1;
+      out.push({cle:b._date != null ? String(b._date) : 'j' + out.length, deb:i, fin:n - 1});
+    }
+    prev = b;
   }
-  if(cle !== null) out.push({cle:cle, deb:deb, fin:n - 1});
   return out;
 }
 
+// Vrai si les barres de la seance s entre les minutes a et z couvrent cette
+// fenetre : la premiere dans l'heure qui suit a, aucune barre de comblement
+// et, pour une fenetre close, la derniere a moins de 4 h de z.
+function couvre(g, s, a, z, close){
+  var m0 = null, m1 = null;
+  for(var i = s.deb; i <= s.fin; i++){
+    var b = g.barre(i), m = b ? +b.m : NaN;
+    if(!(m >= a && m < z)) continue;
+    if(b._trou) return false;
+    if(m0 === null) m0 = m;
+    m1 = m;
+  }
+  return m0 !== null && m0 <= a + MARGE[0] && (!close || m1 >= z - MARGE[1]);
+}
+
+// Date AAAA-MM-JJ en millisecondes UTC, null si la cle n'est pas une date (footprint).
+function jour(cle){
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(cle);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null;
+}
+
+// Jours de semaine strictement entre deux dates : une seance manque entre elles.
+// ponytail: les feries comptent ; le lendemain d'un ferie, la veille passe pour manquante, donc masquee.
+function ouvresEntre(a, b){
+  var d = jour(a), f = jour(b), n = 0;
+  if(d === null || f === null) return 0;
+  for(d += 864e5; d < f; d += 864e5) if(new Date(d).getUTCDay() % 6) n++;
+  return n;
+}
+
+// Jour de la semaine (0 dimanche a 6 samedi), -1 sans date.
+// ponytail: les feries sont ignores ; une semaine ouverte un mardi apres un lundi ferie passe pour incomplete.
+function jourSem(cle){ var d = jour(cle); return d === null ? -1 : new Date(d).getUTCDay(); }
+
 // Semaine ISO d'une date AAAA-MM-JJ, en cle triable ; '' si la date manque.
 function semaine(cle){
-  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(cle);
-  if(!m) return '';
-  var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  var t = jour(cle);
+  if(t === null) return '';
+  var d = new Date(t);
   var j = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - j);
   var an = d.getUTCFullYear();
@@ -132,9 +182,13 @@ function bandes(out, src, nom, vwap, sd, n){
 }
 
 // Ce qui ne bouge pas pendant la seance : veille, pivots, sommes de la semaine.
+// La veille doit etre la seance ouvree d'avant, chargee sur toute sa fenetre ;
+// une semaine doit partir du lundi, sans seance manquante ni incomplete.
 function fixes(g, r, S, cur, tick){
-  var out = [], eth = (g.seance === 'eth'), mV = (eth && r.pdRth) ? RTH_M : null;
-  var veille = cur > 0 ? resume(g, S[cur - 1].deb, S[cur - 1].fin, mV, tick, !!(r.vp && r.vpVeille)) : null;
+  var out = [], eth = (g.seance === 'eth'), mV = (eth && r.pdRth) ? RTH_M : null, dur = DUREE[eth ? 'eth' : 'rth'];
+  var pv = cur > 0 ? S[cur - 1] : null;
+  var veille = pv && !ouvresEntre(pv.cle, S[cur].cle) && couvre(g, pv, mV || 0, mV ? RTH_FIN : dur, true)
+    ? resume(g, pv.deb, pv.fin, mV, tick, !!(r.vp && r.vpVeille)) : null;
   if(veille){
     if(r.cles){
       ajouter(out, 'cles', 'PDH', veille.hi);
@@ -150,34 +204,43 @@ function fixes(g, r, S, cur, tick){
   }
   // Semaine ISO precedente, pour les pivots ; semaine en cours, pour le VWAP hebdo.
   var semCur = semaine(S[cur].cle), hi = -Infinity, lo = Infinity, c = null, sem = '';
-  var som = {V:0, PV:0, PV2:0};
+  var som = {V:0, PV:0, PV2:0, ok:!!semCur}, okPrec = true, apres = S[cur].cle, debut = apres, debPrec = '';
   for(var i = cur - 1; i >= 0; i--){
     var s = semaine(S[i].cle);
     if(!s) continue;
     var R = resume(g, S[i].deb, S[i].fin, null, tick, false);
     if(!R) continue;
-    if(s === semCur){ som.V += R.V; som.PV += R.PV; som.PV2 += R.PV2; continue; }
-    if(sem && s !== sem) break;
+    if(s !== semCur && sem && s !== sem) break;
+    // Seance chargee en entier, sans jour ouvre manquant jusqu'a la suivante ;
+    // la derniere de la semaine precedente doit etre un vendredi.
+    var ok = couvre(g, S[i], 0, dur, true) && (s !== semCur && !sem ? jourSem(S[i].cle) === 5 : !ouvresEntre(S[i].cle, apres));
+    apres = S[i].cle;
+    if(s === semCur){ som.V += R.V; som.PV += R.PV; som.PV2 += R.PV2; som.ok = som.ok && ok; debut = apres; continue; }
     sem = s;
+    debPrec = apres;
+    okPrec = okPrec && ok;
     if(c === null) c = R.c;
     if(R.hi > hi) hi = R.hi;
     if(R.lo < lo) lo = R.lo;
   }
-  if(r.pivH && c !== null) pivots(out, 'pivH', 'w', hi, lo, c);
+  som.ok = som.ok && jourSem(debut) === 1;
+  if(r.pivH && c !== null && okPrec && jourSem(debPrec) === 1) pivots(out, 'pivH', 'w', hi, lo, c);
   return {niveaux:out, semaine:som};
 }
 
 // Niveaux de la seance en cours, recalcules a chaque tick.
 function courants(g, r, S, cur, F, tick){
-  var out = [], eth = (g.seance === 'eth'), m0 = eth ? RTH_M : 0;
-  var deb = S[cur].deb, fin = S[cur].fin, last = g.barre(fin);
+  var out = [], eth = (g.seance === 'eth'), m0 = eth ? RTH_M : 0, s = S[cur];
+  var deb = s.deb, fin = s.fin, last = g.barre(fin);
   if(!last) return out;
   var enRth = eth && +last.m >= RTH_M, besoinP = !!(r.vp || r.tpo), surRth = !!(r.vpRth && enRth);
-  var R = resume(g, deb, fin, null, tick, besoinP && !surRth);
+  // Seance chargee depuis son ouverture (plein), ou depuis 09:30 pour ce qui ne regarde que RTH.
+  var plein = couvre(g, s, 0, Infinity), rth = surRth && couvre(g, s, RTH_M, Infinity);
+  var R = resume(g, deb, fin, null, tick, besoinP && !surRth && plein);
   if(!R) return out;
-  var P = !besoinP ? null : surRth ? resume(g, deb, fin, RTH_M, tick, true) : R, px = surRth ? 'RTH' : '';
-  if(r.vwap && R.vwap != null) bandes(out, 'vwap', 'DVWAP', R.vwap, R.sd, r.sigmas);
-  if(r.vwapH){
+  var P = !besoinP ? null : surRth ? (rth ? resume(g, deb, fin, RTH_M, tick, true) : null) : plein ? R : null, px = surRth ? 'RTH' : '';
+  if(r.vwap && plein && R.vwap != null) bandes(out, 'vwap', 'DVWAP', R.vwap, R.sd, r.sigmas);
+  if(r.vwapH && plein && F.semaine.ok){
     var V = F.semaine.V + R.V, PV = F.semaine.PV + R.PV, PV2 = F.semaine.PV2 + R.PV2;
     if(V > 0){ var wv = PV / V; bandes(out, 'vwap', 'wVWAP', wv, Math.sqrt(Math.max(0, PV2 / V - wv * wv)), r.sigmas); }
   }
@@ -191,26 +254,28 @@ function courants(g, r, S, cur, F, tick){
     ajouter(out, 'tpo', 'TVAH', P.tpo.vah);
     ajouter(out, 'tpo', 'TVAL', P.tpo.val);
   }
-  if(r.plages){ ajouter(out, 'plages', 'HOD', R.hi); ajouter(out, 'plages', 'LOD', R.lo); }
-  // Ouvertures : ETH, 0h, H4 et RTH ; overnight avant 09:30.
+  if(r.plages && plein){ ajouter(out, 'plages', 'HOD', R.hi); ajouter(out, 'plages', 'LOD', R.lo); }
+  // Ouvertures : ETH, 0h, H4 et RTH ; overnight avant 09:30. Une ouverture
+  // n'est prise que si la premiere barre de sa fenetre tombe dans l'heure.
   var h4 = Math.floor(+last.m / H4_M) * H4_M, oH4 = null, o0h = null, oRth = null, on = null;
+  var ouv = function(b, a){ return !b._trou && +b.m < a + MARGE[0] ? b.o : NaN; };
   for(var i = deb; i <= fin; i++){
     var b = g.barre(i);
-    if(!b || b._trou) continue;
+    if(!b) continue;
     var m = +b.m;
-    if(oH4 === null && m >= h4) oH4 = b.o;
+    if(oH4 === null && m >= h4) oH4 = ouv(b, h4);
     if(eth){
-      if(o0h === null && m >= MINUIT_M) o0h = b.o;
-      if(m < RTH_M){ if(!on) on = {hi:b.h, lo:b.l}; else { if(b.h > on.hi) on.hi = b.h; if(b.l < on.lo) on.lo = b.l; } }
-      else if(oRth === null) oRth = b.o;
+      if(o0h === null && m >= MINUIT_M) o0h = ouv(b, MINUIT_M);
+      if(m >= RTH_M && oRth === null) oRth = ouv(b, RTH_M);
+      if(m < RTH_M && !b._trou){ if(!on) on = {hi:b.h, lo:b.l}; else { if(b.h > on.hi) on.hi = b.h; if(b.l < on.lo) on.lo = b.l; } }
     }
   }
   if(r.cles){
-    ajouter(out, 'cles', eth ? 'OpenETH' : 'OpenRTH', R.o);
+    ajouter(out, 'cles', eth ? 'OpenETH' : 'OpenRTH', plein ? R.o : null);
     if(eth){ ajouter(out, 'cles', 'Open0h', o0h); ajouter(out, 'cles', 'OpenRTH', oRth); }
     ajouter(out, 'cles', 'OpenH4', oH4);
   }
-  if(r.plages && on){ ajouter(out, 'plages', 'ONH', on.hi); ajouter(out, 'plages', 'ONL', on.lo); }
+  if(r.plages && on && couvre(g, s, 0, RTH_M)){ ajouter(out, 'plages', 'ONH', on.hi); ajouter(out, 'plages', 'ONL', on.lo); }
   var plages = [[r.orMin, 'OR'], [r.ibMin, 'IB']];
   for(var k = 0; k < plages.length; k++){
     var duree = +plages[k][0];
@@ -222,7 +287,7 @@ function courants(g, r, S, cur, F, tick){
       if(b.h > hi) hi = b.h;
       if(b.l < lo) lo = b.l;
     }
-    if(isFinite(hi)){ ajouter(out, 'or', plages[k][1] + 'H', hi); ajouter(out, 'or', plages[k][1] + 'L', lo); }
+    if(isFinite(hi) && couvre(g, s, m0, m0 + duree)){ ajouter(out, 'or', plages[k][1] + 'H', hi); ajouter(out, 'or', plages[k][1] + 'L', lo); }
   }
   return out;
 }
@@ -261,17 +326,50 @@ function calc(g, r){
   return R;
 }
 
-function texte(g, x, y, s, col, taille, gras, align){
+// Texte, sur un fond si `fond` est donne.
+function texte(g, x, y, s, col, taille, gras, align, fond){
   var e = g.echelle || 1, c = g.ctx;
   c.save();
   c.font = (gras ? 'bold ' : '') + Math.round(taille * e) + 'px system-ui, -apple-system, Segoe UI, sans-serif';
   c.textAlign = align;
   c.textBaseline = 'middle';
+  var w = c.measureText(s).width;
+  if(fond){
+    c.fillStyle = fond;
+    c.fillRect((align === 'right' ? x - w : align === 'center' ? x - w / 2 : x) - 2 * e, y - (taille / 2 + 2) * e, w + 4 * e, (taille + 4) * e);
+  }
   c.fillStyle = col;
   c.fillText(s, x, y);
-  var w = c.measureText(s).width;
   c.restore();
   return w;
+}
+
+// Les etudes se dessinent dans l'ordre de leurs fichiers, et un fichier
+// enregistre dans l'Editeur d'etudes passe en dernier : un profil de volume
+// dessine apres celle-ci couvrait les badges. Textes et badges se dessinent
+// donc une fois l'image de la page finie, par-dessus toutes les etudes, avec
+// la transformation et le cadre de l'image.
+// ponytail: microtache apres le dessin de la page ; si HFQExt gagne un ordre de dessin, s'en servir.
+var DEVANT = null;
+function devant(g, L){
+  var attendu = !DEVANT;
+  DEVANT = {c:g.ctx, T:g.ctx.getTransform(), F:g.cadre, L:L};
+  if(attendu) Promise.resolve().then(function(){
+    var D = DEVANT, c = D.c, F = D.F;
+    DEVANT = null;
+    c.save();
+    try{
+      c.setTransform(D.T);
+      c.globalAlpha = 1;
+      c.globalCompositeOperation = 'source-over';
+      c.setLineDash([]);
+      c.beginPath();
+      c.rect(F.gauche, F.haut, F.droite - F.gauche, F.bas - F.haut);
+      c.clip();
+      for(var i = 0; i < D.L.length; i++) D.L[i][0].apply(null, D.L[i].slice(1));
+    }catch(x){ console.error('[confluence] textes :', x); }
+    c.restore();
+  });
 }
 
 // Badge a la Resolve : la note dans une case pleine, les noms a sa droite sur
@@ -288,7 +386,7 @@ function badge(g, y, score, noms, col, taille){
   c.save();
   c.fillStyle = col;
   c.fillRect(x0, yt, ws, h);
-  c.fillStyle = 'rgba(12,14,20,0.82)';
+  c.fillStyle = FOND;
   c.fillRect(x0 + ws, yt, wn, h);
   c.strokeStyle = col;
   c.lineWidth = 1 * e;
@@ -363,7 +461,7 @@ var def = {
   dessine:function(g, r){
     var R = calc(g, r);
     if(!R) return;
-    var e = g.echelle || 1, c = g.ctx, F = g.cadre;
+    var e = g.echelle || 1, c = g.ctx, F = g.cadre, textes = [];
     var pad = R.tick * r.largeur / 2, marge = R.tick * r.prox;
     for(var i = 0; i < R.zones.length; i++){
       var z = R.zones[i];
@@ -371,7 +469,7 @@ var def = {
         if(r.voirSeuls) for(var k = 0; k < z.items.length; k++){
           var y = g.y(z.items[k].prix);
           g.ligne(z.items[k].prix, {couleur:r.c2, opacite:0.35, pointille:[2,4]});
-          if(c && r.etiq && y > F.haut && y < F.bas) texte(g, F.droite - 4 * e, y - 6 * e, z.items[k].nom, r.c2, Math.max(6, r.fsize - 2), false, 'right');
+          if(c && r.etiq && y > F.haut && y < F.bas) textes.push([texte, g, F.droite - 4 * e, y - 6 * e, z.items[k].nom, r.c2, Math.max(6, r.fsize - 2), false, 'right', FOND]);
         }
         continue;
       }
@@ -388,10 +486,11 @@ var def = {
         var noms = [];
         for(k = 0; k < z.items.length; k++) noms.push(z.items[k].nom);
         var ym = g.y((z.bas + z.haut) / 2);
-        if(c){ if(ym > F.haut && ym < F.bas) badge(g, ym, z.score, noms.join(' · '), proche ? r.cprox : col, r.fsize); }
+        if(c){ if(ym > F.haut && ym < F.bas) textes.push([badge, g, ym, z.score, noms.join(' · '), proche ? r.cprox : col, r.fsize]); }
         else g.etiquette((z.bas + z.haut) / 2, {couleur:col, texte:z.score + ' · ' + noms.join(' '), sansTrait:true});
       }
     }
+    if(textes.length) devant(g, textes);
   }
 };
 

@@ -24,6 +24,8 @@ Un graphe de trader est couvert de niveaux : VWAP, POC, pivots, haut et bas de l
 
 **Proximité.** Le prix courant est à moins de « Distance de proximité » ticks de la zone : elle s'allume.
 
+**Données manquantes.** Un niveau n'est affiché que si le graphe charge toute sa fenêtre. La séance doit partir de son ouverture, dans l'heure, pour `DVWAP`, `HOD`, `LOD`, `OpenETH`, l'overnight et les profils de la séance entière. Les niveaux RTH demandent seulement 09h30. La veille doit être la séance ouvrée précédente, chargée sur sa fenêtre : RTH ou séance entière, jusqu'à 4 h de la fin. Une semaine doit partir du lundi, sans séance manquante ni incomplète, et la semaine précédente doit finir un vendredi. Une barre de comblement (trou du courtier) masque ce qui la contient. Ces règles sont celles des points pivots.
+
 ## À quoi ça sert
 
 Un niveau isolé est une opinion. Trois niveaux issus de méthodes indépendantes qui tombent au même prix sont une coïncidence que beaucoup d'intervenants regardent en même temps, et c'est là que le prix réagit le plus souvent. L'étude vous évite de garder dix indicateurs à l'écran et de compter de tête : elle montre où ils s'empilent et à quel point.
@@ -33,9 +35,9 @@ Ce que ça change pour la décision : une zone à score élevé est un endroit o
 ## Lire le graphe
 
 - **Bande** horizontale par zone, plus opaque quand le score monte.
-- **Badge** au bord droit : le score dans une case pleine, puis les niveaux de la zone. Gris à 2, bleu à 3, rouge à partir de 4, blanc quand le prix est à portée.
+- **Badge** au bord droit : le score dans une case pleine, puis les niveaux de la zone. Gris à 2, bleu à 3, rouge à partir de 4, blanc quand le prix est à portée. Badges et noms se dessinent par-dessus les autres études, un profil de volume par exemple.
 - **Halo** : deux lignes claires aux bords de la zone quand le prix est à portée.
-- **Niveaux isolés** en trait fin pointillé avec leur nom en petit, à droite.
+- **Niveaux isolés** en trait fin pointillé avec leur nom en petit, à droite, sur un fond sombre.
 
 ## Configurer
 
@@ -63,10 +65,11 @@ Ce que ça change pour la décision : une zone à score élevé est un endroit o
 
 ### Limites à connaître
 
-- La veille est la séance précédente chargée dans le graphe. Les pivots et le VWAP hebdomadaires exigent que les séances de la semaine soient chargées ; sans semaine précédente, pas de pivots hebdo.
+- Un niveau masqué n'est pas une erreur : la donnée manque (graphe en ticks qui ne remonte qu'à deux semaines, séance tronquée, jour non racheté). Les jours fériés ne sont pas connus : le lendemain d'un férié, la veille passe pour manquante, et une semaine ouverte un mardi après un lundi férié passe pour incomplète.
+- Un trou sans barre de comblement au milieu d'une séance, comme sur le footprint, ne se voit pas.
 - La largeur se règle en ticks : 6 ticks font 1,5 point sur ES et NQ. Un instrument plus large demande une largeur plus grande.
 - Sur un graphe RTH, il n'y a ni overnight, ni `Open0h`, ni `OpenETH`, le graphe commence à 09h30.
-- Sur le footprint, qui ne date pas ses barres, seule la séance affichée est connue : pas de veille, pas de pivots, pas de semaine.
+- Sur le footprint, qui ne date pas ses barres, les séances se découpent quand les minutes repartent en arrière : la veille et les pivots journaliers restent, mais ni semaine, ni `wVWAP`, ni pivots hebdomadaires.
 - Resolve ajoute un VWAP mensuel et des profils sur plusieurs horizons ; ici, tout vient des barres chargées dans le graphe.
 
 ---
@@ -95,6 +98,8 @@ A trader's chart is covered with levels: VWAP, POC, pivots, yesterday's high and
 
 **Proximity.** Current price within "Proximity distance" ticks of the zone: it lights up.
 
+**Missing data.** A level is shown only if the chart loads its whole window. The session must start at its open, within the hour, for `DVWAP`, `HOD`, `LOD`, `OpenETH`, the overnight and whole-session profiles. RTH levels only need 09:30. The previous session must be the previous business day, loaded over its window: RTH or the whole session, up to 4 h before its end. A week must start on Monday, with no missing or incomplete session, and the previous week must end on a Friday. A filler bar (broker gap) masks whatever contains it. These are the pivot points study's rules.
+
 ## What it is for
 
 A single level is an opinion. Three levels from independent methods landing at the same price are a coincidence many participants watch at the same time, and that is where price reacts most often. The study saves you from keeping ten indicators on screen and counting in your head: it shows where they stack and how much.
@@ -104,9 +109,9 @@ What it changes for a decision: a high-score zone is a place to expect a reactio
 ## Reading the chart
 
 - **Horizontal band** per zone, more opaque as the score rises.
-- **Badge** at the right edge: the score in a filled box, then the zone's levels. Grey at 2, blue at 3, red from 4, white when price is within reach.
+- **Badge** at the right edge: the score in a filled box, then the zone's levels. Grey at 2, blue at 3, red from 4, white when price is within reach. Badges and names are drawn over the other studies, a volume profile for instance.
 - **Glow**: two bright lines at the zone's edges when price is within reach.
-- **Isolated levels** as thin dashed lines with their name in small print on the right.
+- **Isolated levels** as thin dashed lines with their name in small print on the right, on a dark background.
 
 ## Settings
 
@@ -134,8 +139,9 @@ What it changes for a decision: a high-score zone is a place to expect a reactio
 
 ### Known limits
 
-- "Previous session" is the previous session loaded in the chart. Weekly pivots and VWAP need the week's sessions to be loaded; without a previous week, no weekly pivots.
+- A masked level is not a bug: the data is missing (a tick chart going back only two weeks, a cut session, a day not bought back). Holidays are not known: the day after a holiday, the previous session counts as missing, and a week opening on a Tuesday after a Monday holiday counts as incomplete.
+- A gap without filler bars in the middle of a session, as on the footprint, goes unseen.
 - Width is set in ticks: 6 ticks are 1.5 points on ES and NQ. A wider instrument needs a wider setting.
 - On an RTH chart there is no overnight, no `Open0h`, no `OpenETH`, the chart starts at 09:30.
-- On the footprint, which does not date its bars, only the displayed session is known: no previous day, no pivots, no week.
+- On the footprint, which does not date its bars, sessions are split where the minutes go back: the previous session and daily pivots remain, but no week, no `wVWAP`, no weekly pivots.
 - Resolve adds a monthly VWAP and profiles over several horizons; here everything comes from the bars loaded in the chart.
