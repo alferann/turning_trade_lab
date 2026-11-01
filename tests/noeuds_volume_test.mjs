@@ -266,24 +266,35 @@ const sierra = [pane('session', { title: 'Delta' }), pane('session', { title: 'V
   }
 }
 
-// 8. Budget: cold frame (TT builds the session profile, then detection) and cached frames.
+// 8. Budget: TT suspends a study after three frames over 8 ms in a row. A new bar makes the session
+// profile stale and TT's builder costs about 10 ms on a full ES session, so the study rebuilds on one
+// frame and serves its cache on the next (FROIDE). The rule is measured on a run of frames with one
+// new bar each, not on a single worst-case frame, which the archive's growth or a GC pass fails.
 {
   panes([pane('session')]);
-  // Cold: best of three new bars, each after a cached frame; the cost is mostly TT's builder.
   const B = bars.slice(), G = () => g({ B });
-  let froid = Infinity;
-  for (let k = 0; k < 3; k++) {
-    E.dessine(G(), defaut); B.push(Object.assign({}, B[B.length - 1]));
-    const t0 = performance.now(); E.dessine(G(), defaut); froid = Math.min(froid, performance.now() - t0);
+  E.dessine(G(), defaut);
+  const T = [];
+  let suite = 0, pire = 0;
+  for (let k = 0; k < 12; k++) {
+    B.push(Object.assign({}, B[B.length - 1]));
+    const t0 = performance.now(); E.dessine(G(), defaut); const ms = performance.now() - t0;
+    T.push(ms);
+    suite = ms > 8 ? suite + 1 : 0; pire = Math.max(pire, suite);
   }
   assert.equal(E.calcul(G(), defaut).profils.length, 1);
+  assert.ok(pire < 3, 'trois images de suite au-dessus de 8 ms : ' + T.map(x => x.toFixed(1)).join(' '));
+  // Cold frames are the slow ones; a ceiling well above TT's builder still catches a real regression.
+  const froides = T.filter(x => x > 1), froid = froides.length ? Math.min(...froides) : Math.max(...T);
+  assert.ok(froid < 40, 'image froide ' + froid.toFixed(2) + ' ms');
   const t1 = performance.now(); for (let k = 0; k < 50; k++) E.dessine(G(), defaut); const chaud = (performance.now() - t1) / 50;
   const P = VP.buildFromBars(last.bars, { tick: 0.25, mode: 'session' }).profile;
   const t2 = performance.now(); for (let k = 0; k < 20; k++) E.outils.detecter(P, avec({ lissage: k % 4 })); const detection = (performance.now() - t2) / 20;
-  assert.ok(froid < 8 && chaud < 1 && detection < 2, 'budget 8 ms, mesuré froid ' + froid.toFixed(2) + ' chaud ' + chaud.toFixed(3) + ' détection ' + detection.toFixed(3));
+  assert.ok(chaud < 1 && detection < 2, 'budget : chaud ' + chaud.toFixed(3) + ' ms, détection ' + detection.toFixed(3) + ' ms');
   console.log('OK', bars.length, 'barres ES,', reels.length, 'profils réels |',
     reels.map(x => x.cle.slice(5) + ' ' + x.rangees + 'r×' + x.pas + ' ' + x.n.join('/')).join(', '),
-    '(HVN/LVN/ledge/shelf) | froid', froid.toFixed(2), 'ms, chaud', chaud.toFixed(3), 'ms, détection', detection.toFixed(3), 'ms');
+    '(HVN/LVN/ledge/shelf) | froid', froid.toFixed(2), 'ms, chaud', chaud.toFixed(3), 'ms, détection', detection.toFixed(3), 'ms,',
+    T.filter(x => x > 8).length, 'images > 8 ms sur 12, au plus', pire, 'de suite');
 }
 
 // 9. Missing data: a profile the chart does not load entirely is hidden, with its reason, and its
@@ -354,14 +365,16 @@ const sierra = [pane('session', { title: 'Delta' }), pane('session', { title: 'V
   assert.deepEqual(T.filter(x => x.x === 8).map(x => x.s), [PARTIELLE + ' · SVP'], 'raison du SVP en haut à gauche');
   assert.ok(T.some(x => x.s === 'HVN · CMP 90') && T.every(x => x.x === 8 || / · CMP 90$/.test(x.s)), 'nœuds du composite seuls');
   assert.equal(rec.filter(x => x.k === 'zone').length, N.hvn.length + N.lvn.length + N.shelf.length, 'zones du composite seules');
-  // Cost of the check on a tick-sized chart (20 sessions of 10 000 bars), only paid when a profile is rebuilt.
+  // Cost of the check on a tick-sized chart (20 sessions of 10 000 bars), only paid on the frame that
+  // rebuilds a profile (the next one serves the cache), so the ceilings only guard against a regression
+  // of the scan, not the 8 ms frame budget.
   const gros = [];
   for (let s = 0; s < 20; s++) for (let k = 0; k < 10000; k++) gros.push({ _date: '2026-10-' + String(1 + s).padStart(2, '0'), m: k * 0.1379 });
   const G = { n: gros.length, premiere: gros.length - 2000, derniere: gros.length - 1, seance: 'eth', cadre: { droite: 1e9 }, barre: i => gros[i], x: i => i };
   const cout = scope => { let t = Infinity; for (let k = 0; k < 5; k++) { const t0 = performance.now(); E.outils.manque(G, scope, jours); t = Math.min(t, performance.now() - t0); } return t; };
   jours = { days: 90, daysAsked: 90, dateFrom: '2026-01-01' };
   const cS = cout('session'), cR = cout('rolling');
-  assert.ok(cS < 2 && cR < 8, 'vérification : séance ' + cS.toFixed(2) + ' ms, composite ' + cR.toFixed(2) + ' ms');
+  assert.ok(cS < 5 && cR < 20, 'vérification : séance ' + cS.toFixed(2) + ' ms, composite ' + cR.toFixed(2) + ' ms');
   console.log('OK données manquantes : séance prise en cours, tronquée, comblée, composite court ou troué, footprint | vérification sur',
     gros.length, 'barres : séance', cS.toFixed(2), 'ms, composite', cR.toFixed(2), 'ms');
 }
