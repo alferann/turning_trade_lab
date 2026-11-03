@@ -123,11 +123,14 @@ assert.ok(reels.every(x => x.n[0] <= 10 && x.n[1] <= 8), 'pas de pluie de nœuds
 
 // Fake chart: TT's panel API and the chart's bundle function, fed from the archive.
 const rec = [], appels = [];
+// The frame covers the whole archive, 10 px per point: a zone outside it is culled by the study, and the
+// archive's price range moves every day.
+const PH = Math.ceil(Math.max(...bars.map(b => b.h))) + 10, PB = Math.floor(Math.min(...bars.map(b => b.l))) - 10;
 const g = (o = {}) => {
   const B = o.B || bars, n = B.length;
   return { n, premiere: o.premiere ?? n - 300, derniere: n - 1, tick: 0.25, seance: 'eth', sym: 'ES', tf: 1, echelle: 1,
-    cadre: { gauche: 0, droite: 1000, haut: 0, bas: 3000 }, barre: i => B[i] || null, niveaux: i => ({ n: (B[i] && B[i].lv || []).length }),
-    x: i => i, y: p => (7900 - p) * 10,
+    cadre: { gauche: 0, droite: 1000, haut: 0, bas: (PH - PB) * 10 }, barre: i => B[i] || null, niveaux: i => ({ n: (B[i] && B[i].lv || []).length }),
+    x: i => i, y: p => (PH - p) * 10,
     zone(bas, haut, st) { rec.push({ k: 'zone', bas, haut, st }); }, ligne(p, st) { rec.push({ k: 'ligne', p, st }); },
     texte(x, y, s, st) { rec.push({ k: 'texte', x, y, s, st }); }, trait() {}, etiquette() {} };
 };
