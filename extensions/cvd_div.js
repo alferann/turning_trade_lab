@@ -17,7 +17,8 @@
 // Rien n'est tire de donnees manquantes : le CVD se cumule depuis l'ancrage,
 // meme quand l'ecran commence apres lui, et une seance prise apres son
 // ancrage, trouee ou dont une barre n'a pas de niveaux (delta inconnu) n'a
-// ni CVD ni divergence a partir de la, legende a l'appui.
+// ni CVD ni divergence a partir de la, legende a l'appui. Sur ticks, volume ou
+// range, les trous sont ceux que TT connait, pas l'ecart entre deux barres.
 (function(){
 
 // ponytail: 09:30 ET en minutes de seance sur un graphe ETH ouvert a 18:00 (ES, NQ).
@@ -25,8 +26,52 @@
 var RTH_M = 930;
 // Trou de donnees, en minutes : plus de 10 minutes sans barre au-dela d'une
 // barre, le seuil des marques « sans donnee » de TT (HFQLiveSeed.trouEntre).
-// ponytail: graphes en ticks, volume ou range, sans duree de barre : une heure, qu'une barre lente d'Asie peut approcher.
+// Sur ticks, volume ou range, l'ecart entre deux barres est la duree d'une
+// barre, pas un trou (une barre de 12 000 ticks d'ES dure jusqu'a 99 min la
+// nuit) : la tolerance ne juge que l'ancrage, les trous se lisent chez TT.
 function tolere(g){ return typeof g.tf === 'number' ? Math.max(1, g.tf) + 10 : 60; }
+// Date de seance d'une barre : `_date` sur les bougies, `_sd` sur le footprint.
+function dateDe(b){ return String(b._date || b._sd || ''); }
+// Trous d'une seance d'un graphe en ticks, volume ou range, lus chez TT : la
+// page pour la seance du direct (subGap, subTrous de candles.html et
+// footprint.html), le memo de HFQLiveSeed.ticksJour pour les jours passes.
+// {ok, t:[[m0, m1], ...]} en minutes de seance, bornes incluses ; null tant
+// que la reponse n'est pas la (seance masquee), et tout se relit a son arrivee
+// (`v` entre dans la signature de l'amorce). Sans HFQLiveSeed (banc), aucun
+// trou connu. Un rachat en cours chez le courtier se redemande 15 s plus tard.
+var TROUS = {cle:'', v:0, J:{}};
+function trousTicks(g, date, vif){
+  var cle = [g.sym, g.seance].join('|');
+  if(TROUS.cle !== cle){ TROUS.cle = cle; TROUS.J = {}; TROUS.v++; }
+  if(vif){
+    var gap = -1, t = [];
+    try{ if(typeof subGap === 'function') gap = subGap(); if(typeof subTrous === 'function') t = (subTrous() || []).slice(); }catch(_){}
+    if(gap >= 0) t.push([0, gap]);
+    return {ok:true, t:t};
+  }
+  var J = TROUS.J[date];
+  if(J && J.exp && maintenant() > J.exp) J = undefined;
+  if(J !== undefined) return J;
+  var LS = typeof HFQLiveSeed !== 'undefined' ? HFQLiveSeed : null;
+  if(!LS || typeof LS.ticksJour !== 'function' || !date) return (TROUS.J[date] = {ok:true, t:[]});
+  TROUS.J[date] = null;
+  // Reponse rendue dans l'appel (memo synchrone, banc) : servie tout de suite,
+  // rien a relire ; sinon tout se relit a son arrivee.
+  var sync = true, fini = function(r){
+    TROUS.J[date] = r && r.ok ? {ok:r.complet !== false || (r.trous || []).length > 0, t:r.trous || []}
+      : r && r.enCours ? {ok:false, t:[], exp:maintenant() + 15000} : {ok:false, t:[]};
+    if(!sync){ TROUS.v++; redessiner(); }
+  };
+  try{ LS.ticksJour({sym:g.sym, day:date, session:g.seance, attendre:false}).then(fini, function(){ fini(null); }); }
+  catch(_){ fini(null); }
+  sync = false;
+  return TROUS.J[date];
+}
+// Seance du direct : celle de la derniere barre quand la page est en direct
+// (LIVE_ON de candles.html et footprint.html).
+function enDirect(g, b){
+  try{ var der = g.barre((g.n | 0) - 1); return !!(typeof LIVE_ON !== 'undefined' && LIVE_ON && der && dateDe(der) === dateDe(b)); }catch(_){ return false; }
+}
 
 // Anglais : noms, descriptions, reglages, options, textes du canevas et des
 // notifications. Les descriptions portent aussi le suffixe que le panneau ajoute.
@@ -314,11 +359,15 @@ function debut(g, k, p, rth){
 // Une barre de plus dans la seance de CVD E : delta, cumul depuis l'ancrage et
 // validite. Le cumul n'est juste que si la seance part de son ancrage, sans
 // barre de comblement, sans barre sans niveaux (delta inconnu, pas nul) ni
-// trou de plus de `ecart` minutes ; invalide, elle le reste jusqu'a la suivante.
-function etend(E, b, L, neuve, rth, ecart){
-  var m = +b.m, n = L ? L.n : 0;
-  if(neuve){ E.cum = 0; E.ok = m - (rth && m >= RTH_M ? RTH_M : 0) <= ecart; }
-  else if(m - E.m > ecart) E.ok = false;
+// trou : plus de `ecart` minutes entre deux barres sur un graphe en minutes
+// (`T` undefined), un trou connu de TT qui touche la seance depuis son ancrage
+// sur ticks, volume ou range (`T` de trousTicks, null tant qu'il se lit) ;
+// invalide, elle le reste jusqu'a la suivante.
+function etend(E, b, L, neuve, rth, ecart, T){
+  var m = +b.m, n = L ? L.n : 0, a0 = rth && m >= RTH_M ? RTH_M : 0;
+  if(neuve){ E.cum = 0; E.ok = m - a0 <= ecart; }
+  else if(T === undefined && m - E.m > ecart) E.ok = false;
+  if(T !== undefined && (!T || !T.ok || T.t.some(function(h){ return h[0] <= m && h[1] >= a0; }))) E.ok = false;
   if(b._trou || !n) E.ok = false;
   E.d = n ? (L.deltaTotal() || 0) : 0;
   E.cum += E.d; E.m = m;
@@ -335,7 +384,7 @@ var AMORCE = {sig:'', s0:0, k:0, C:[], bad:Infinity, cle0:'', der:''};
 function amorce(g, rth, ecart, i0, fin){
   var A = AMORCE, p = i0 > 0 ? g.barre(i0 - 1) : null, E = {cum:0, ok:true, m:NaN, d:0}, k, b, q;
   if(!p) return E;
-  var sig = [g.sym, g.tf, g.seance, rth, ecart].join('|'), aNiv = (typeof g.niveaux === 'function');
+  var sig = [g.sym, g.tf, g.seance, rth, ecart, TROUS.v].join('|'), aNiv = (typeof g.niveaux === 'function'), tick = typeof g.tf !== 'number', T;
   if(A.sig !== sig || i0 - 1 < A.s0 || cleBarre(g.barre(A.s0)) !== A.cle0 || (A.k > A.s0 && cleBarre(g.barre(A.k - 1)) !== A.der)){
     k = debut(g, i0 - 1, p, rth);
     A.sig = sig; A.s0 = A.k = k; A.C = []; A.bad = Infinity; A.cle0 = cleBarre(g.barre(k));
@@ -348,7 +397,8 @@ function amorce(g, rth, ecart, i0, fin){
     if(!(b = g.barre(k))){ A.C[k - A.s0] = S.cum; continue; }
     var neuve = !q || !meme(q, b, rth);
     if(neuve && k > A.s0){ A.s0 = k; A.C = []; A.bad = Infinity; A.cle0 = cleBarre(b); }
-    etend(S, b, aNiv ? g.niveaux(k) : null, neuve, rth, ecart);
+    if(tick && (neuve || T === undefined)) T = trousTicks(g, dateDe(b), enDirect(g, b));
+    etend(S, b, aNiv ? g.niveaux(k) : null, neuve, rth, ecart, T);
     A.C[k - A.s0] = S.cum;
     if(!S.ok && A.bad > k) A.bad = k;
     q = b;
@@ -364,7 +414,7 @@ function calc(g, r){
   var idx = [], hi = [], lo = [], cv = [], dl = [], sk = [], mn = [];
   var aDelta = false, manque = false, seg = 0;
   var aNiv = (typeof g.niveaux === 'function');
-  var rth = (r.anc === 'rth' && g.seance === 'eth'), ecart = tolere(g);
+  var rth = (r.anc === 'rth' && g.seance === 'eth'), ecart = tolere(g), tick = typeof g.tf !== 'number', T;
   var E = amorce(g, rth, ecart, i0, maintenant() + AMORCE_MS), p = i0 > 0 ? g.barre(i0 - 1) : null;
   if(!E){ redessiner(); return {attente:true}; }
   for(var i = i0; i <= i1; i++){
@@ -372,7 +422,8 @@ function calc(g, r){
     if(!b) continue;
     var neuve = !p || !meme(p, b, rth);
     if(neuve) seg++;
-    etend(E, b, aNiv ? g.niveaux(i) : null, neuve, rth, ecart);
+    if(tick && (neuve || T === undefined)) T = trousTicks(g, dateDe(b), enDirect(g, b));
+    etend(E, b, aNiv ? g.niveaux(i) : null, neuve, rth, ecart, T);
     p = b;
     if(E.d !== 0) aDelta = true;
     // Seance invalide a partir d'ici : ni CVD ni divergence, la legende le dit.
@@ -485,12 +536,13 @@ function meches(g, S, d0, t0){
 }
 
 // Un calcul par image, partage par les deux etudes : la cle change avec la
-// fenetre, la derniere barre (prix et delta) et les reglages de detection.
+// fenetre, la derniere barre (prix et delta), les reglages de detection et
+// l'arrivee des trous lus chez TT (TROUS.v).
 var CACHE = {cle:'', S:null};
 function cleDe(g, r){
   var V = vue(g), b = g.barre(V[1]) || {};
   var L = (typeof g.niveaux === 'function') ? g.niveaux(V[1]) : null;
-  return [g.sym, g.tf, g.seance, g.n, V[0], V[1], b.c, b.h, b.l, (L && L.n) ? L.deltaTotal() : 0,
+  return [g.sym, g.tf, g.seance, g.n, V[0], V[1], b.c, b.h, b.l, (L && L.n) ? L.deltaTotal() : 0, TROUS.v,
           DETECTION.map(function(d){ return r[d.k]; }).join('|')].join('|');
 }
 function calcCache(g, r){

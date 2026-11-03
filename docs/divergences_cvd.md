@@ -52,7 +52,7 @@ Ce que ça change pour la décision : une divergence confirmée au niveau où vo
 
 Le volet CVD dessine le delta cumulé en chandeliers, un par barre, du cumul d'ouverture au cumul de clôture, avec l'axe zéro. La mèche montre le plus haut et le plus bas atteints par le cumul pendant la barre. Seule la tape (les exécutions une à une) donne cet ordre, et TT ne la fournit que pour la séance affichée, en direct ou rejouée. Une barre n'a donc de mèche que si sa tape redonne exactement son delta : les séances précédentes, ou une barre où la tape commence ou s'interrompt, gardent le corps seul. Au chargement d'une séance chargée, les mèches apparaissent en quelques images.
 
-**Rien n'est tracé sur des données manquantes.** Un CVD n'est juste que cumulé en entier depuis son ancrage. Une séance de CVD (la séance du graphe, ou chacune de ses deux parties avec l'ancrage RTH) prise après son ancrage, ou qui contient une barre de comblement, une barre sans niveaux (son delta est inconnu, pas nul) ou un trou de plus de 10 minutes au-delà de la durée d'une barre (le seuil des marques « sans donnée » de Turning Trade ; une heure sur les graphes en ticks, en volume ou en range), n'a ni CVD ni divergence à partir de là, jusqu'à la séance suivante. Ce qui précède le trou est juste et reste tracé. La légende « séance incomplète » le signale en haut à gauche, sur le prix et dans le volet.
+**Rien n'est tracé sur des données manquantes.** Un CVD n'est juste que cumulé en entier depuis son ancrage. Une séance de CVD (la séance du graphe, ou chacune de ses deux parties avec l'ancrage RTH) prise après son ancrage, ou qui contient une barre de comblement, une barre sans niveaux (son delta est inconnu, pas nul) ou un trou de plus de 10 minutes au-delà de la durée d'une barre (le seuil des marques « sans donnée » de Turning Trade ; sur les graphes en ticks, en volume ou en range, où l'écart entre deux barres n'est que la durée d'une barre, les trous sont ceux que Turning Trade connaît : début de séance ou coupure non rendus par le courtier), n'a ni CVD ni divergence à partir de là, jusqu'à la séance suivante. Ce qui précède le trou est juste et reste tracé. La légende « séance incomplète » le signale en haut à gauche, sur le prix et dans le volet.
 
 ## Configurer
 
@@ -105,7 +105,7 @@ Les réglages de détection, de filtrage et de couleur vivent sur l'étude **Div
 ## Limites connues
 
 - Une séance prise en cours est masquée jusqu'à sa fin. Avec l'ancrage RTH, sa partie RTH revient dès 09h30 : un graphe NQ chargé à partir de 03h21 garde son CVD et ses divergences de la séance de New York.
-- Les seuils de trou suivent ceux de Turning Trade sur les graphes en minutes. Sur les graphes en ticks, en volume ou en range, faute de durée de barre, seul un trou de plus d'une heure est vu.
+- Les seuils de trou suivent ceux de Turning Trade sur les graphes en minutes. Sur les graphes en ticks, en volume ou en range, l'étude lit les trous connus de Turning Trade (séance du jour : ligne d'état du graphe ; jours passés : réponse du hub) ; un trou que Turning Trade ignore lui échappe aussi.
 - Au premier affichage d'une très longue séance de CVD (graphe en ticks fin, ancrage ETH), la lecture depuis l'ancrage s'étale sur quelques images, sans rien tracer pendant ce temps.
 
 ---
@@ -162,7 +162,7 @@ What it changes for a decision: a confirmed divergence at a level where you alre
 
 The CVD pane draws cumulative delta as candles, one per bar, from the opening to the closing total, with the zero axis. The wick shows the highest and lowest total reached during the bar. Only the tape (trades one by one) gives that order, and TT only serves it for the displayed session, live or replayed. A bar therefore gets a wick only if its tape gives back exactly its delta: earlier sessions, or a bar where the tape starts or breaks off, keep the body alone. When a busy session loads, wicks appear within a few frames.
 
-**Nothing is drawn from missing data.** A CVD is only right when summed in full from its anchor. A CVD session (the chart's session, or each of its two parts with the RTH anchor) joined after its anchor, or holding a filler bar, a bar without levels (its delta is unknown, not zero) or a hole of more than 10 minutes beyond one bar's duration (the threshold of Turning Trade's "no data" marks; one hour on tick, volume or range charts) has no CVD nor divergence from there on, until the next session. What comes before the hole is right and stays drawn. The "incomplete session" caption says so at the top left, on price and in the pane.
+**Nothing is drawn from missing data.** A CVD is only right when summed in full from its anchor. A CVD session (the chart's session, or each of its two parts with the RTH anchor) joined after its anchor, or holding a filler bar, a bar without levels (its delta is unknown, not zero) or a hole of more than 10 minutes beyond one bar's duration (the threshold of Turning Trade's "no data" marks; on tick, volume or range charts, where the time between two bars is only a bar's length, the holes are those Turning Trade knows: session start or outage not served by the broker) has no CVD nor divergence from there on, until the next session. What comes before the hole is right and stays drawn. The "incomplete session" caption says so at the top left, on price and in the pane.
 
 ## Settings
 
@@ -215,5 +215,5 @@ Detection, filter and colour settings live on **Divergences CVD · prix**. The C
 ## Known limits
 
 - A session joined late is hidden until its end. With the RTH anchor its RTH part comes back from 09:30: an NQ chart loaded from 03:21 keeps its CVD and divergences of the New York session.
-- Hole thresholds follow Turning Trade's on minute charts. On tick, volume or range charts, with no bar duration, only a hole of more than one hour is seen.
+- Hole thresholds follow Turning Trade's on minute charts. On tick, volume or range charts the study reads the holes Turning Trade knows (live session: the chart's status line; past days: the hub's answer); a hole Turning Trade misses is missed too.
 - The first time a very long CVD session shows (fine tick chart, ETH anchor), reading it from the anchor spreads over a few frames, with nothing drawn meanwhile.

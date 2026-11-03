@@ -33,11 +33,11 @@ const bars = aplat(SESS);
 const N = bars.length;
 
 // Loads the study in a fresh context, with TT's session modules if asked.
-function charge(avecTT = false) {
+function charge(avecTT = false, extra = {}) {
   const defs = [], notes = [];
   class Notification { constructor(t, o) { notes.push(t + ' | ' + o.body); } }
   Notification.permission = 'granted';
-  const vc = vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; }, redessiner() {} }, Notification, performance, console, HFQSessions });
+  const vc = vm.createContext(Object.assign({ HFQExt: { etude(d) { defs.push(d); return true; }, redessiner() {} }, Notification, performance, console, HFQSessions }, extra));
   if (avecTT) for (const f of ['hfq-clock.js', 'hfq-sessions-monde.js']) vm.runInContext(fs.readFileSync(path.join(PAYLOAD, f), 'utf8'), vc);
   vm.runInContext(SRC, vc);
   assert.equal(defs.length, 1);
@@ -262,8 +262,8 @@ const lu = notes => notes.map(t => { const m = /^ES · (.+) ([HL]) \| .+ : ([\d.
   const L = SESS.length - 1, dL = SESS[L].date, dP = SESS[L - 1].date;
   const avecJour = (k, f, S = SESS) => S.map((s, j) => j === k ? { date: s.date, bars: f(s.bars) } : s);
   // Sessions drawn, read from the labels; outils.montre agrees for every closed session.
-  const vus = (B, G = g(B)) => {
-    const { E: T } = charge(), R = plein(T, G, defaut);
+  const vus = (B, G = g(B), extra) => {
+    const { E: T } = charge(false, extra), R = plein(T, G, defaut);
     rec.length = 0; T.dessine(G, defaut);
     const ids = [...new Set(rec.filter(x => x.k === 'texte').map(x => Object.keys(NOM).find(k => x.s.startsWith(NOM[k] + ' '))))].sort();
     assert.deepEqual(Object.keys(R.D).filter(id => T.outils.montre(R, R.D[id])).sort(), ids, 'montre() = sessions tracées');
@@ -301,6 +301,20 @@ const lu = notes => notes.map(t => { const m = /^ES · (.+) ([HL]) \| .+ : ([\d.
   const Wt = W(new Date().toISOString().slice(0, 10)), sans = B => B.map(b => { const c = Object.assign({}, b); delete c._date; return c; });
   assert.deepEqual(vus(sans(aplat(avecJour(L, b => b.filter(x => x.m >= Wt.eu.a + 21))))), ['fin', 'us'], 'footprint : séance prise à Londres');
   assert.deepEqual(vus(sans(aplat(avecJour(L - 1, b => b.filter(x => x.m < Wt.eu.a + 60))))), ['asie', 'eu'], 'footprint : veille coupée');
+  // Tick, volume and range charts: a bar may last 90 minutes in Tokyo, which is no hole. Holes come from TT
+  // (HFQLiveSeed.ticksJour for past days, subGap and subTrous for the live session) and mask the sessions they touch.
+  {
+    const clair = b => b.filter(x => x.m >= 540 || x.m % 90 === 0);
+    const T90 = aplat(SESS.map(s => ({ date: s.date, bars: clair(s.bars) })));
+    let TR = {}, GAP = -1;
+    const tick = extra => vus(T90, Object.assign(g(T90), { tf: '100t' }), Object.assign({ HFQLiveSeed: { ticksJour: ({ day }) => ({ then(f) { f({ ok: true, complet: !(TR[day] || []).length, trous: TR[day] || [] }); } }) },
+      subGap: () => GAP, subTrous: () => [] }, extra));
+    assert.deepEqual(tick(), vus(bars), 'ticks : barres de 90 min à Tokyo, mêmes sessions que le graphe en minutes');
+    TR = { [dL]: [[W(dL).eu.a + 60, W(dL).eu.a + 90]] };
+    assert.deepEqual(tick(), ['asie', 'fin', 'us'], 'ticks : trou du hub à Londres, Londres masqué');
+    TR = {}; GAP = 300;
+    assert.deepEqual(tick({ LIVE_ON: true }), ['eu', 'fin', 'us'], 'ticks : début de séance non rendu, Tokyo masqué');
+  }
   // Notifications: a masked level never rings. After the cut day, the live session opens with one bar inside the
   // cut London's range (no touch on it), then a bar that touches every level: only the drawn ones ring.
   {
