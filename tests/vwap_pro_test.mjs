@@ -384,6 +384,26 @@ const fin = (C, B, f) => C.vwap[B.findLastIndex(f)];
   assert.ok(ms < 1, 'footprint : image chaude ' + ms.toFixed(3) + ' ms');
 }
 
+// 10c. The footprint dates its bars with `_sd`, not `_date` (fpPrepSeance): weekly and monthly anchors, session
+// windows and the one-minute completion read either, so a footprint gives the VWAP of the candles chart. Another
+// instance for each `_sd` run: the cache key of a bar is the same under both names, and only the first n cells of
+// a cache array belong to the chart.
+{
+  const sd = B => B.map(b => { const c = Object.assign({ _sd: b._date }, b); delete c._date; return c; });
+  const egal = (a, b) => a.length === b.length && a.every((v, i) => Number.isNaN(v) ? Number.isNaN(b[i]) : Math.abs(v - b[i]) < 1e-6);
+  for (const anc of ['sem', 'mois', 'eu']) {
+    const r = avec({ anc }), ref = Array.from(A.calcul(g(BR), r).vwap.subarray(0, BR.length)), fp = Array.from(defs[2].calcul(g(sd(BR)), r).vwap.subarray(0, BR.length));
+    assert.ok(egal(fp, ref), 'footprint `_sd` : ' + anc + ' = bougies');
+    if (anc !== 'eu') assert.ok(Number.isFinite(fp[BR.length - 1]), 'footprint `_sd` : ' + anc + ' tracé');
+  }
+  FICHIERS['_footprint_eth_FS.json'] = { sessions: R };
+  const r = avec({ anc: 'sem' }), T = ticks(sd(BT), 'FS');
+  assert.ok(Number.isNaN(defs[3].calcul(T, r).vwap[0]), 'footprint en ticks `_sd` : masqué avant le fichier');
+  await servir();
+  const ref = Array.from(A.calcul(ticks(BT, 'T1'), r).vwap.subarray(0, BT.length)), tk = Array.from(defs[3].calcul(T, r).vwap.subarray(0, BT.length));
+  assert.ok(egal(tk, ref) && Number.isFinite(tk[BT.length - 1]), 'footprint en ticks `_sd` : semaine complétée par le fichier minute');
+}
+
 // 11. Budget: the cold compute spans several frames, never three in a row over 8 ms (TT's suspension rule, so a
 // lone GC pause does not fail the bench); then cached frames.
 {

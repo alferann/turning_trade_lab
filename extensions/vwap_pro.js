@@ -253,11 +253,11 @@ function sommes(A, b, src){
 // tronquee, plus d'un jour ouvre sans seance (le fichier n'a pas de barres de
 // comblement), derniere barre plus d'une heure avant la premiere du graphe.
 // null s'il n'y a rien a completer, ou rien pour le faire : un graphe en
-// minutes est tire de ce fichier, le footprint n'a pas de date ; calcul y
-// masque la periode.
+// minutes est tire de ce fichier, une barre sans date n'a pas de periode ;
+// calcul y masque la periode.
 function amorce(C, g, r, b0, sig){
-  if(!b0 || !b0._date || typeof g.tf === 'number') return null;
-  var anc = r.anc, date0 = String(b0._date).slice(0, 10), m0 = +b0.m, dur = DUREE[g.seance] || DUREE.eth, cal = anc === 'sem' || anc === 'mois';
+  if(!b0 || !dateDe(b0) || typeof g.tf === 'number') return null;
+  var anc = r.anc, date0 = dateDe(b0), m0 = +b0.m, dur = DUREE[g.seance] || DUREE.eth, cal = anc === 'sem' || anc === 'mois';
   var F = SEANCES[anc] ? fenetreM(bornesET(anc, date0, r), OUVERTURE[g.seance] != null ? OUVERTURE[g.seance] : 1080) : null;
   if((F && !dansF(F, m0)) || ecart(anc, F, date0, m0, dur) < DEBUT_MAX) return null;
   var M = minutes(g), k = sig + '|' + (M ? M.pret : '-');
@@ -290,8 +290,12 @@ function amorce(C, g, r, b0, sig){
 }
 
 function aujourdhui(){ return new Date().toISOString().slice(0, 10); }
+// Date de seance AAAA-MM-JJ d'une barre : `_date` des bougies, sinon `_sd`,
+// que le footprint pose sur ses barres (2026-11-03 : sans elle, l'hebdo et le
+// mensuel y repartaient a chaque seance et les fenetres se lisaient a la date du jour).
+function dateDe(b){ return b ? String(b._date || b._sd || '').slice(0, 10) : ''; }
 // Cle d'une barre, pour reconnaitre la derniere lue a son index.
-function cleBarre(b){ return b ? (b._date || '') + ':' + b.m : ''; }
+function cleBarre(b){ return b ? dateDe(b) + ':' + b.m : ''; }
 function maintenant(){ return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now(); }
 function redessiner(){
   try{ if(typeof setTimeout !== 'undefined' && HFQExt.redessiner) setTimeout(function(){ HFQExt.redessiner(); }, 0); }catch(_){}
@@ -328,9 +332,9 @@ function calcul(C, g, r, fin){
     if(fin && !(i & 255) && i > depuis && maintenant() > fin) break;
     var b = g.barre(i);
     if(!b){ C.cle[i] = null; C.vwap[i] = NaN; C.sd[i] = NaN; C.sessAt[i] = sess; C.V[i] = 0; C.ok[i] = 0; continue; }
-    if(prev && (b._date != null ? String(b._date) !== String(prev._date) : +b.m < +prev.m)) sess++;
+    var date = dateDe(b), cle, F = null;
+    if(prev && (date ? date !== dateDe(prev) : +b.m < +prev.m)) sess++;
     C.sessAt[i] = sess;
-    var date = b._date ? String(b._date).slice(0, 10) : '', cle, F = null;
     if(r.anc === 'jour') cle = 'j' + sess;
     else if(r.anc === 'sem' || r.anc === 'mois') cle = date ? periode(r.anc, date) : 'j' + sess;
     else {
@@ -359,7 +363,7 @@ function calcul(C, g, r, fin){
     // ponytail: seule la premiere periode du graphe se complete par le fichier minute ; plus loin, une seance entamee en retard (jour partiel d'un graphe en ticks) est masquee, et un trou au milieu d'une seance sans barre de comblement passe inapercu.
     var ok = !!cle && !b._trou;
     if(ok && !suite) ok = ecart(r.anc, F, date, +b.m, dur) < DEBUT_MAX || (A0 === A && A.ok);
-    else if(ok) ok = C.ok[i - 1] === 1 && (C.sessAt[i - 1] === sess || (+prev.m >= dur - FIN_MAX && +b.m < DEBUT_MAX && !manquent(String(prev._date).slice(0, 10), date)));
+    else if(ok) ok = C.ok[i - 1] === 1 && (C.sessAt[i - 1] === sess || (+prev.m >= dur - FIN_MAX && +b.m < DEBUT_MAX && !manquent(dateDe(prev), date)));
     C.ok[i] = ok ? 1 : 0;
     if(ok && C.V[i] > 0){
       var vw = C.PV[i] / C.V[i];
