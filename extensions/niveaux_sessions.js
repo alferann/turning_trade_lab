@@ -95,8 +95,50 @@ function ouvresEntre(a, b){
 }
 // Trou de donnees, en minutes : plus de 10 minutes sans barre au-dela d'une
 // barre, le seuil des marques « sans donnee » de TT (HFQLiveSeed.trouEntre).
-// ponytail: graphes en ticks, volume ou range, sans duree de barre : une heure, qu'une barre lente d'Asie peut approcher.
+// Sur ticks, volume ou range, l'ecart entre deux barres est la duree d'une
+// barre, pas un trou (une barre de 12 000 ticks d'ES dure jusqu'a 99 min la
+// nuit) : la tolerance ne sert pas, les trous se lisent chez TT (trousTicks).
 function tolere(g){ return typeof g.tf === 'number' ? Math.max(1, g.tf) + 10 : 60; }
+// Trous d'une seance d'un graphe en ticks, volume ou range, lus chez TT : la
+// page pour la seance du direct (subGap, subTrous de candles.html et
+// footprint.html), le memo de HFQLiveSeed.ticksJour pour les jours passes.
+// {ok, t:[[m0, m1], ...]} en minutes de seance, bornes incluses ; null tant
+// que la reponse n'est pas la (session masquee), et tout se relit a son
+// arrivee (signature de l'etat effacee). Sans HFQLiveSeed (banc), aucun trou
+// connu. Un rachat en cours chez le courtier se redemande 15 s plus tard.
+var TROUS = {cle:'', J:{}};
+function trousTicks(g, date, vif){
+  var cle = [g.sym, g.seance].join('|');
+  if(TROUS.cle !== cle){ TROUS.cle = cle; TROUS.J = {}; }
+  if(vif){
+    var gap = -1, t = [];
+    try{ if(typeof subGap === 'function') gap = subGap(); if(typeof subTrous === 'function') t = (subTrous() || []).slice(); }catch(_){}
+    if(gap >= 0) t.push([0, gap]);
+    return {ok:true, t:t};
+  }
+  var J = TROUS.J[date];
+  if(J && J.exp && maintenant() > J.exp) J = undefined;
+  if(J !== undefined) return J;
+  var LS = typeof HFQLiveSeed !== 'undefined' ? HFQLiveSeed : null;
+  if(!LS || typeof LS.ticksJour !== 'function' || !date) return (TROUS.J[date] = {ok:true, t:[]});
+  TROUS.J[date] = null;
+  // Reponse rendue dans l'appel (memo synchrone, banc) : servie tout de suite,
+  // rien a relire ; sinon tout se relit a son arrivee.
+  var sync = true, fini = function(r){
+    TROUS.J[date] = r && r.ok ? {ok:r.complet !== false || (r.trous || []).length > 0, t:r.trous || []}
+      : r && r.enCours ? {ok:false, t:[], exp:maintenant() + 15000} : {ok:false, t:[]};
+    if(!sync){ ETAT.sig = ''; redessiner(); }
+  };
+  try{ LS.ticksJour({sym:g.sym, day:date, session:g.seance, attendre:false}).then(fini, function(){ fini(null); }); }
+  catch(_){ fini(null); }
+  sync = false;
+  return TROUS.J[date];
+}
+// Seance du direct : celle de la derniere barre quand la page est en direct
+// (LIVE_ON de candles.html et footprint.html).
+function enDirect(g, b){
+  try{ var der = g.barre((g.n | 0) - 1); return !!(typeof LIVE_ON !== 'undefined' && LIVE_ON && der && String(der._date || der._sd || '') === String(b._date || b._sd || '')); }catch(_){ return false; }
+}
 // Minute de seance sans la pause : la queue d'une session ouverte la veille
 // reprend ou la seance du graphe s'arretait.
 function minute(x, dur){ return x < 1440 ? Math.min(x, dur) : x - 1440 + dur; }
@@ -167,7 +209,9 @@ function touche(S, o, v, b, i, vive){
 // ouverte la veille). Relire la derniere barre, qui grossit encore, ne
 // change rien de ce qui est deja note. Une session est complete (`ok`) si sa
 // premiere barre suit son debut, sa derniere precede sa fin et deux barres ne
-// s'ecartent pas de plus de P.tol minutes, sans barre de comblement.
+// s'ecartent pas de plus de P.tol minutes, sans barre de comblement ; sur
+// ticks, volume ou range (P.ticks), si aucun trou connu de TT ne touche sa
+// fenetre, dans les minutes de la date de chaque barre.
 function lit(S, b, i, j, vive, P){
   var date = b._date ? String(b._date).slice(0, 10) : aujourdhui();
   var F = S.F[date] || (S.F[date] = fenetres(date, P.ouv).sort(function(x, y){ return x.a - y.a; }));
@@ -181,7 +225,7 @@ function lit(S, b, i, j, vive, P){
   var cle = s.id + ':' + (j - q);
   if(!S.cour || S.cour.cle !== cle){
     if(S.cour && S.cour.H.i >= 0){
-      if(S.cour.b - S.cour.t > P.tol) S.cour.ok = false;
+      if(!P.ticks && S.cour.b - S.cour.t > P.tol) S.cour.ok = false;
       S.D[S.cour.id] = S.cour;
     }
     S.cour = {id:s.id, cle:cle, nom:s.nom, col:s.col, H:niveau(1), L:niveau(-1),
@@ -193,7 +237,11 @@ function lit(S, b, i, j, vive, P){
   for(var id in S.D){ touche(S, S.D[id], S.D[id].H, b, i, vive); touche(S, S.D[id], S.D[id].L, b, i, vive); }
   // Les barres tombent avant la pause : seule la queue d'une session ouverte la veille passe par minute().
   var t = q ? m + P.dur : m;
-  if(t - (c.t < 0 ? c.a : c.t) > P.tol) c.ok = false;
+  if(P.ticks){
+    var T = trousTicks(P.g, b._sd && !b._date ? String(b._sd).slice(0, 10) : date, enDirect(P.g, b)), wa = q ? s.a - 1440 : s.a, wb = q ? s.b - 1440 : s.b;
+    if(!T || !T.ok || T.t.some(function(h){ return h[0] < wb && h[1] >= wa; })) c.ok = false;
+  }
+  else if(t - (c.t < 0 ? c.a : c.t) > P.tol) c.ok = false;
   c.t = t;
   if(b.h > c.H.p){ c.H.p = b.h; c.H.i = i; }
   if(b.l < c.L.p){ c.L.p = b.l; c.L.i = i; }
@@ -213,7 +261,7 @@ function calcul(g, r){
   S.vu = n;
   // Milieu de la barre sur les unites de temps en minutes, comme les bandes de TT.
   var P = {ouv:OUVERTURE[g.seance] != null ? OUVERTURE[g.seance] : 1080, demi:typeof g.tf === 'number' ? g.tf / 2 : 0,
-    dur:DUREE[g.seance] || 1380, tol:tolere(g)};
+    dur:DUREE[g.seance] || 1380, tol:tolere(g), ticks:typeof g.tf !== 'number', g:g};
   for(var i = S.n, t0 = maintenant(); i < n; i++){
     if(!(i & 255) && i > S.n && i < n - 1 && maintenant() - t0 > BUDGET_MS){ S.n = i; redessiner(); return S; }
     if(!(b = g.barre(i))) continue;

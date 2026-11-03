@@ -21,7 +21,7 @@ const J = e => !e || !e.length ? { n: 0, deltaTotal: () => 0 }
 
 // Loads the file in a fresh context: HFQExt stub, HFQNotify stub that records pushes.
 let defs, pushes, surch = {}, demandes = 0;
-function charger() {
+function charger(extra = {}) {
   defs = []; pushes = [];
   const HFQExt = {
     etude(d) { defs.push(d); return true; },
@@ -34,24 +34,24 @@ function charger() {
   // No HFQNotify in Turning Trade 0.4.6: the study falls back to desktop notifications.
   class Notification { constructor(titre, o) { pushes.push({ titre, texte: o && o.body }); } }
   Notification.permission = 'granted';
-  vm.runInContext(SRC, vm.createContext({ HFQExt, window: {}, Notification, setTimeout: f => f(), performance, console, Math, String, Number, Object, Array, isNaN, isFinite, NaN, Infinity }));
+  vm.runInContext(SRC, vm.createContext(Object.assign({ HFQExt, window: {}, Notification, setTimeout: f => f(), performance, console, Math, String, Number, Object, Array, isNaN, isFinite, NaN, Infinity }, extra)));
   return { prix: defs.find(d => d.id === 'cvddiv-prix'), cvd: defs.find(d => d.id === 'cvddiv-cvd') };
 }
 let { prix, cvd } = charger();
 const defaut = d => Object.fromEntries(d.reglages.map(x => [x.k, x.defaut]));
 
-function g(B, premiere, derniere, rec) {
-  return { premiere, derniere, n: B.length, tick: db.tick, seance: 'eth', sym: 'ES', tf: 1, echelle: 1, ctx: null,
+function g(B, premiere, derniere, rec, tf = 1) {
+  return { premiere, derniere, n: B.length, tick: db.tick, seance: 'eth', sym: 'ES', tf, echelle: 1, ctx: null,
     cadre: { gauche: 0, droite: 1e9, haut: 0, bas: 500 },
     barre: i => B[i] || null, niveaux: i => J(B[i] && B[i].lv), x: i => i, y: v => v,
     trait(p, o) { rec.push({ k: 'trait', p, o }); }, texte(x, y, s) { rec.push({ k: 'texte', x, s }); } };
 }
 // Draws until the study stops asking for a redraw (its lead may be read over several frames under load) and
 // returns the records of the last frame.
-function image(def, B, premiere, derniere, r) {
+function image(def, B, premiere, derniere, r, tf = 1) {
   let rec = [];
   demandes = 1;
-  for (let k = 0; demandes && k < 50; k++) { demandes = 0; rec = []; def.dessine(g(B, premiere, derniere, rec), r); }
+  for (let k = 0; demandes && k < 50; k++) { demandes = 0; rec = []; def.dessine(g(B, premiere, derniere, rec, tf), r); }
   return rec;
 }
 function signaux(def, r, B = bars, premiere = 300, derniere = B.length - 1) {
@@ -144,16 +144,19 @@ assert.equal(signaux(cvd, { conf: 'pivot', tol: 0 }).length, signaux(prix, { con
 // 9. Notifications, in a fresh load: the first frame only primes the memory, the next frame
 //    with 40 more bars notifies the recent formations and confirmations once, never the history.
 {
+  // The replayed window ends 10 bars after the B of the latest signal that leaves room, so a formation (p1 = 3 bars
+  // after B) always lands inside it, whatever the archive's tail holds today.
+  const FIN = Math.max(...conf.map(s => s.b).filter(b => b + 10 <= N - 1)) + 10;
   // Bar by bar, as live frames arrive: an event older than 2*p1 bars is never replayed.
   const rejouer = (r) => { ({ prix } = charger()); surch = {}; const rec = [];
-    prix.dessine(g(bars, N - 1380 + 300, N - 41, rec), r);
+    prix.dessine(g(bars, FIN - 1380 + 300, FIN - 40, rec), r);
     assert.equal(pushes.length, 0, 'aucune notification au premier passage');
-    for (let d = N - 40; d <= N - 1; d++) prix.dessine(g(bars, N - 1380 + 300, d, rec), r);
+    for (let d = FIN - 39; d <= FIN; d++) prix.dessine(g(bars, FIN - 1380 + 300, d, rec), r);
     return rec; };
   const r = defaut(prix), rec = rejouer(r);
   const n1 = pushes.length;
   assert.ok(n1 > 0 && pushes.every(m => m.titre === 'Divergence CVD' && /^ES · (UE|UA|DE|DA)\d (en formation|confirmée) à /.test(m.texte)), 'notifications des nouveaux signaux : ' + JSON.stringify(pushes.slice(0, 2)));
-  prix.dessine(g(bars, N - 1380 + 300, N - 1, rec), r);
+  prix.dessine(g(bars, FIN - 1380 + 300, FIN, rec), r);
   assert.equal(pushes.length, n1, 'une seule fois par signal');
   console.log('  notifications sur 40 barres :', n1, '| exemple :', pushes[0].texte);
   rejouer(Object.assign({}, r, { alForm: false, alConf: false }));
@@ -399,6 +402,41 @@ function tapeReelle(sym, date) {
     const A = ancre(T, 'eth'), pts = t.p.filter(p => isFinite(p[0]));
     assert.ok(images > 1 && !susp && pts.length > 100 && pts.every(p => p[1] === A[p[0]]), 'amorce de 60 000 barres étalée, ' + images + ' images, pire ' + pire.toFixed(2) + ' ms');
     console.log('  amorce de 60 000 barres :', images, 'images, pire', pire.toFixed(2), 'ms par étude');
+  }
+  // Tick, volume and range charts: the time between two bars is a bar's length, not a hole (a 12 000-tick ES bar
+  // lasts up to 99 min at night). Holes come from TT instead: HFQLiveSeed.ticksJour for past days, subGap and
+  // subTrous of the page for the live session (LIVE_ON). On minute charts the inter-bar rule stays.
+  {
+    const src = db.sessions.flatMap(s => s.bars).filter(b => b.lv && b.lv.length).slice(0, 400);
+    assert.equal(src.length, 400, '400 barres à niveaux');
+    const pas = k => (k === 50 || k === 120 || k === 200 ? 99 : 2);
+    const jour = d => { let m = 0; return src.map((b, k) => { m = k ? m + pas(k) : 0; return Object.assign({}, b, { _date: d, m }); }); };
+    const d1 = '2026-11-04', d2 = '2026-11-05', B = jour(d1).concat(jour(d2));
+    const i300 = B.findIndex(b => b._date === d1 && b.m >= 300), i200 = B.findIndex(b => b._date === d2 && b.m >= 200);
+    let TR = {}, GAP = -1, ST = [];
+    const ctx = () => ({ HFQLiveSeed: { ticksJour: ({ day }) => ({ then(f) { f({ ok: true, complet: !(TR[day] || []).length, trous: TR[day] || [] }); } }) },
+      subGap: () => GAP, subTrous: () => ST });
+    const points = (tf, extra) => {
+      ({ prix, cvd } = charger(Object.assign(ctx(), extra))); surch = { anc: 'eth' };
+      const rl = Object.assign(defaut(cvd), { style: 'ligne' }), rec = image(cvd, B, 0, B.length - 1, rl, tf);
+      const t = rec.find(x => x.k === 'trait' && x.o.couleur === rl.ccvd);
+      return { idx: t ? t.p.filter(p => isFinite(p[0])).map(p => p[0]) : [], legende: rec.some(x => x.k === 'texte' && /incomplète/.test(x.s)) };
+    };
+    const a = points('100t');
+    assert.ok(a.idx.includes(300) && a.idx.includes(700) && !a.legende, 'ticks : barres de 99 min, deux séances entières tracées');
+    TR = { [d1]: [[300, 320]] };
+    const b = points('100t');
+    assert.ok(b.idx.some(i => i < i300) && !b.idx.some(i => i >= i300 && i < 400) && b.idx.includes(700) && b.legende, 'ticks : trou du hub, séance masquée à partir du trou');
+    TR = {}; GAP = 700;
+    const c = points('100t', { LIVE_ON: true });
+    assert.ok(c.idx.includes(300) && !c.idx.some(i => i >= 400) && c.legende, 'ticks : début de séance non rendu, séance du direct masquée');
+    GAP = -1; ST = [[200, 210]];
+    const e = points('100t', { LIVE_ON: true });
+    assert.ok(e.idx.includes(300) && e.idx.some(i => i >= 400 && i < i200) && !e.idx.some(i => i >= i200), 'ticks : coupure du direct, masquée à partir d\'elle');
+    ST = [];
+    const m = points(1);
+    assert.ok(m.idx.some(i => i < 50) && !m.idx.some(i => i >= 50 && i < 400) && m.legende, 'minutes : un écart de 99 min reste un trou');
+    ({ prix, cvd } = charger()); surch = {};
   }
 }
 
