@@ -48,9 +48,11 @@ const rec = [];
 const ctx2d = { set fillStyle(c) { this._c = c; }, set strokeStyle(c) { this._s = c; }, set lineWidth(l) { this._l = l; }, set globalAlpha(a) { this._a = a; }, beginPath() { this._p = []; },
   rect(x, y, w, h) { this._p.push({ x, y, w, h }); }, fill() { for (const r of this._p) rec.push(Object.assign({ k: 'rect', c: this._c, a: this._a }, r)); },
   stroke() { for (const r of this._p) rec.push(Object.assign({ k: 'cadre', c: this._s, a: this._a }, r)); } };
-const prixMax = Math.max(...D.flatMap(d => d.volRows.map(r => r[0]))) + 10;
+// The frame covers the whole composite, 20 px per point: a row outside it is culled by the study, and the
+// archive's price range moves every day.
+const prixMax = Math.max(...D.flatMap(d => d.volRows.map(r => r[0]))) + 10, prixMin = Math.min(...D.flatMap(d => d.volRows.map(r => r[0]))) - 10;
 const g = (o = {}) => Object.assign({ graphe: 'profil', n: 0, premiere: 0, derniere: 0, tick: 0.25, seance: 'rth', sym: 'ES', echelle: 1, ctx: ctx2d,
-  cadre: { gauche: 0, droite: 1000, haut: 0, bas: 5000, largeur: 1000, hauteur: 5000 }, barre: () => null, y: v => (prixMax - v) * 20,
+  cadre: { gauche: 0, droite: 1000, haut: 0, bas: (prixMax - prixMin) * 20, largeur: 1000, hauteur: (prixMax - prixMin) * 20 }, barre: () => null, y: v => (prixMax - v) * 20,
   trait(p, o) { rec.push({ k: 'trait', p: structuredClone(p), o }); }, texte(x, y, s, o) { rec.push({ k: 'texte', x, y, s, o }); } }, o);
 const dessin = (E, G, r) => { rec.length = 0; E.dessine(G, r); return { rects: rec.filter(x => x.k === 'rect'), cadres: rec.filter(x => x.k === 'cadre'), traits: rec.filter(x => x.k === 'trait'), textes: rec.filter(x => x.k === 'texte') }; };
 const proche = (a, b) => Math.abs(a - b) < 1e-6;
