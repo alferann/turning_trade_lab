@@ -20,11 +20,16 @@ const J = e => !e || !e.length ? { n: 0, prix: () => 0, bid: () => 0, ask: () =>
 
 // No HFQSessionsMonde in the context: the study falls back to its built-in session defaults. fetch serves the
 // one-minute files of FICHIERS only when servir() is awaited, like a request in flight.
-const defs = [], FICHIERS = {}, appels = [], attente = [];
-vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console, HFQSessions,
+const defs = [], FICHIERS = {}, HISTS = {}, appels = [], attente = [];
+const zlib = await import('node:zlib');
+// The per-day archive (/_hist/...json.gz) is served gzipped, as the hub does; other files as JSON.
+vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs.push(d); return true; } }, console, HFQSessions, Blob, Response, DecompressionStream, setTimeout,
   HFQSymGuard: { histFile: (t, s) => t + '_' + s + '.json' },
-  fetch(f) { appels.push(f); return new Promise(ok => attente.push(() => ok({ json: () => FICHIERS[f] }))); } }));
-const servir = async () => { while (attente.length) attente.shift()(); await new Promise(r => setImmediate(r)); };
+  fetch(f) { appels.push(f); return new Promise(ok => attente.push(() => ok(f.endsWith('.json.gz')
+    ? (f in HISTS ? { ok: true, arrayBuffer: async () => zlib.gzipSync(Buffer.from(JSON.stringify(HISTS[f]))) } : { ok: false })
+    : { json: () => FICHIERS[f] }))); } }));
+// The gzip archive goes through web streams: give the pending reads a few turns of the loop.
+const servir = async () => { while (attente.length) attente.shift()(); for (let k = 0; k < 10; k++) await new Promise(r => setTimeout(r, 2)); };
 assert.equal(defs.length, 6, 'six instances');
 assert.deepEqual(defs.map(d => d.id), ['vwap-pro-a', 'vwap-pro-b', 'vwap-pro-c', 'vwap-pro-d', 'vwap-pro-e', 'vwap-pro-f'], 'ids stables');
 const A = defs[0];
@@ -402,6 +407,29 @@ const fin = (C, B, f) => C.vwap[B.findLastIndex(f)];
   await servir();
   const ref = Array.from(A.calcul(ticks(BT, 'T1'), r).vwap.subarray(0, BT.length)), tk = Array.from(defs[3].calcul(T, r).vwap.subarray(0, BT.length));
   assert.ok(egal(tk, ref) && Number.isFinite(tk[BT.length - 1]), 'footprint en ticks `_sd` : semaine complétée par le fichier minute');
+}
+
+// 10d. Days older than the minute file come from the hub's per-day gzip archive: the file from the month's second
+//      session, its first served by the archive, the tick chart from the third: week and month equal the chart that
+//      holds the whole file. Masked while the archive is in flight, when its day is incomplete, or missing.
+{
+  const archive = (s, complete = true) => { const [y, mo, d] = s.date.split('-').map(Number), t0 = Date.UTC(y, mo - 1, d - 1, 23, 0) / 1000; return { day: s.date, complete, bars: s.bars.map(b => ({ t: t0 + 60 * b.m, o: b.o, h: b.h, l: b.l, c: b.c, v: 0, ladder: b.lv.map(l => [l[0], l[1], l[2], 0]) })) }; };
+  const egal = (a, b) => a.length === b.length && a.every((v, i) => Number.isNaN(v) ? Number.isNaN(b[i]) : Math.abs(v - b[i]) < 1e-6);
+  // The archive is asked once the minute file is read: one round per file, as the chart redraws in TT.
+  const lire = async (D, G, r) => { for (let k = 0; k < 3; k++) { D.calcul(G, r); await servir(); } return Array.from(D.calcul(G, r).vwap.subarray(0, BT.length)); };
+  FICHIERS['_footprint_eth_AR.json'] = { sessions: R.slice(1) };
+  HISTS['/_hist/profile_AR_' + R[0].date + '.json.gz'] = archive(R[0]);
+  for (const anc of ['sem', 'mois']) {
+    const r = avec({ anc }), ref = Array.from(A.calcul(ticks(BT, 'T1'), r).vwap.subarray(0, BT.length));
+    if (anc === 'sem') assert.ok(Number.isNaN(defs[4].calcul(ticks(BT, 'AR'), r).vwap[0]), 'masqué avant la lecture');
+    const tk = await lire(defs[4], ticks(BT, 'AR'), r);
+    assert.ok(egal(tk, ref) && Number.isFinite(tk[BT.length - 1]), anc + ' : premier jour lu dans l\'archive = graphe qui tient tout le fichier');
+  }
+  assert.equal(appels.filter(f => f.includes('profile_AR_')).length, 1, 'un seul jour demandé à l\'archive');
+  FICHIERS['_footprint_eth_AI.json'] = { sessions: R.slice(1) }; HISTS['/_hist/profile_AI_' + R[0].date + '.json.gz'] = archive(R[0], false);
+  FICHIERS['_footprint_eth_AM.json'] = { sessions: R.slice(1) };
+  assert.ok(Number.isNaN((await lire(defs[5], ticks(BT, 'AI'), avec({ anc: 'mois' })))[BT.length - 1]), 'jour d\'archive incomplet : mois masqué');
+  assert.ok(Number.isNaN((await lire(defs[1], ticks(BT, 'AM'), avec({ anc: 'mois' })))[BT.length - 1]), 'jour d\'archive absent : mois masqué');
 }
 
 // 11. Budget: the cold compute spans several frames, never three in a row over 8 ms (TT's suspension rule, so a
