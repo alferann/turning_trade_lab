@@ -250,6 +250,36 @@ const synth = (dates, M = [0, 1, 1379]) => dates.flatMap((date, s) => [0, 1, 2].
   assert.equal(appels.length, avant, 'graphe en minutes : rien lu');
 }
 
+// 6d. Days older than the minute file come from the hub's per-day gzip archive: the file from the month's third
+//     business day, the first two served by the archive, the tick chart from the fourth: October equals the chart
+//     that holds it whole. An incomplete archive day masks it.
+{
+  const zlib = await import('node:zlib');
+  const B = synth(jours('2026-08-31', '2026-10-14')), HISTS = {}, FICHIERS = {}, attente = [];
+  const D = charger({ HFQSymGuard: { histFile: (t, s) => t + '_' + s + '.json' }, Blob, Response, DecompressionStream, setTimeout,
+    fetch: f => new Promise(ok => attente.push(() => ok(f.endsWith('.json.gz') ? (f in HISTS ? { ok: true, arrayBuffer: async () => zlib.gzipSync(Buffer.from(JSON.stringify(HISTS[f]))) } : { ok: false }) : { ok: true, json: () => FICHIERS[f] }))) })[0];
+  const servir = async () => { attente.splice(0).forEach(x => x()); for (let k = 0; k < 10; k++) await new Promise(r => setTimeout(r, 2)); };
+  const session = date => ({ date, bars: B.filter(b => b._date === date).map(({ _date, ...b }) => b) });
+  // Unix seconds from 18:00 ET of the eve (EDT in October); ladders as the archive writes them.
+  const archive = (date, complete = true) => { const [y, mo, d] = date.split('-').map(Number), t0 = Date.UTC(y, mo - 1, d - 1, 22, 0) / 1000; return { day: date, complete, bars: session(date).bars.map(b => ({ t: t0 + 60 * b.m, o: b.o, h: b.h, l: b.l, c: b.c, v: 0, ladder: b.lv.map(l => [l[0], l[1], l[2], 0]) })) }; };
+  const oct = jours('2026-10-01', '2026-10-14'), M = avec({ periode: 'mois' });
+  const plein = cour(g(B.filter(b => b._date >= '2026-10-01')), M, D);
+  // The archive is asked once the minute file is read: one round per file, as the chart redraws in TT.
+  const lire = async G => { for (let k = 0; k < 3; k++) { cour(G, M, D); await servir(); } return cour(G, M, D); };
+  FICHIERS['_footprint_eth_AR.json'] = { sessions: oct.slice(2).map(session) };
+  HISTS['/_hist/profile_AR_2026-10-01.json.gz'] = archive('2026-10-01'); HISTS['/_hist/profile_AR_2026-10-02.json.gz'] = archive('2026-10-02');
+  const G = g(B.filter(b => b._date >= '2026-10-06'), { sym: 'AR', tf: '1000t' });
+  assert.equal(cour(G, M, D).partiel, '2026-10-06', 'masqué tant que rien n\'est lu');
+  const C = await lire(G);
+  assert.equal(C.partiel, null, 'octobre complété par le fichier et l\'archive');
+  assert.deepEqual([plat(C), C.poc, C.vah, C.val], [plat(plein), plein.poc, plein.vah, plein.val], 'octobre complété = graphe entier');
+  FICHIERS['_footprint_eth_AI.json'] = { sessions: oct.slice(2).map(session) };
+  HISTS['/_hist/profile_AI_2026-10-01.json.gz'] = archive('2026-10-01', false); HISTS['/_hist/profile_AI_2026-10-02.json.gz'] = archive('2026-10-02');
+  assert.equal((await lire(g(B.filter(b => b._date >= '2026-10-06'), { sym: 'AI', tf: '1000t' }))).partiel, '2026-10-06', 'jour d\'archive incomplet : masqué');
+  FICHIERS['_footprint_eth_AM.json'] = { sessions: oct.slice(2).map(session) };
+  assert.equal((await lire(g(B.filter(b => b._date >= '2026-10-06'), { sym: 'AM', tf: '1000t' }))).partiel, '2026-10-06', 'jour d\'archive absent : masqué');
+}
+
 // 6c. Nothing displayed on missing data. Real whole sessions on the business days from Monday 2 November (winter
 // time on both sides: Asia m ∈ [0, 540), Europe [540, 930), US [930, 1320)), on minute charts.
 const PL = db.sessions.filter(s => s.bars[0].m === 0 && s.bars.at(-1).m >= 1370);
