@@ -169,6 +169,17 @@ const synth = (dates, M = [0, 1, 1379]) => dates.flatMap((date, s) => [0, 1, 2].
   assert.equal(cour(g(tard), avec({ periode: 'sem' })).partiel, '2026-10-12', 'lundi pris plus d\'une heure après son ouverture : partiel');
 }
 
+// 6a. Footprint bars carry `_sd` instead of `_date`: same sessions, week and month as the candles.
+{
+  const B = synth(jours('2026-08-31', '2026-10-14'));
+  const sd = B => B.map(b => { const c = Object.assign({ _sd: b._date }, b); delete c._date; return c; });
+  for (const T of ['jour', 'sem', 'mois', 'us']) {
+    const ref = resume(cour(g(B), avec({ periode: T }))), fp = resume(cour(g(sd(B)), avec({ periode: T })));
+    assert.deepEqual(fp, ref, 'footprint `_sd` : ' + T + ' = bougies');
+  }
+  assert.equal(cour(g(sd(B.filter(b => b._date >= '2026-10-02'))), avec({ periode: 'mois' })).partiel, '2026-10-02', 'footprint `_sd` : octobre chargé depuis le 2 : partiel');
+}
+
 // 6b. A tick chart that does not start its week or month is completed from the candles' minute file,
 // read once by fetch; masked until it is read, if the file does not reach the first business day, or
 // if it has a gap of more than four days. A minute chart comes from that file: masked, nothing read.
