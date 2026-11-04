@@ -471,7 +471,8 @@ const POINTS = { plein: null, tirets: [6, 4], points: [2, 3] };
   assert.deepEqual(dessin(avec({ periode: 'us' }), g(synth(jours('2026-10-12', '2026-10-14'), [930, 931, 932]))).textes.map(x => x.s.split(' ').slice(0, 2).join(' ')),
     ['POC RTH', 'VAH RTH', 'VAL RTH', 'Séance US'], 'niveaux de la RTH');
   assert.deepEqual(dessin(avec({ periode: 'sem', pocL: false, vaL: false, etiq: false })).traits, [], 'sans lignes');
-  assert.deepEqual(dessin(avec({ periode: 'sem', pocL: false, vaL: false, etiq: false })).textes, [], 'ni étiquettes');
+  assert.equal(dessin(avec({ periode: 'sem', pocL: false, vaL: false, etiq: false })).textes.length, 1, 'sans étiquettes, la légende reste');
+  assert.deepEqual(dessin(avec({ periode: 'sem', pocL: false, vaL: false, etiq: false, legende: false })).textes, [], 'ni étiquettes ni légende');
   assert.deepEqual(dessin(avec({ periode: 'sem', profil: false })).rects, [], 'sans histogramme');
 
   // Previous sessions on their own bars: from their first bar facing right, or from their close facing left,

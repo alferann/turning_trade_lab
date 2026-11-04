@@ -54,7 +54,7 @@ var DESC_REP_EN = 'Buying or selling resumption after a still valid absorption: 
 var EN = {
   'Absorptions':'Absorptions', 'Reprises après absorption':'Resumptions after absorption',
   'Mémoire (barres)':'Memory (bars)', 'Absorption haussière':'Bullish absorption', 'Absorption baissière':'Bearish absorption',
-  'Opacité des zones':'Zone opacity', 'Étiquettes':'Labels', 'Notification d\'absorption':'Absorption notification',
+  'Opacité des zones':'Zone opacity', 'Étiquettes':'Labels', 'Légende':'Legend', 'Notification d\'absorption':'Absorption notification',
   'Volume mini (× médiane)':'Minimum volume (× median)', 'Ticks de l\'extrême':'Ticks at the extreme',
   'Delta mini (× médiane)':'Minimum delta (× median)', 'Tests mini':'Minimum tests',
   'Volume d\'un test (× médiane)':'Volume of a test (× median)', 'Fenêtre (barres)':'Window (bars)',
@@ -450,6 +450,7 @@ var defAbs = {
     {k:'baissiere', label:'Absorption baissière', type:'color', defaut:'#ffa53f'},
     {k:'opacite', label:'Opacité des zones', type:'number', defaut:0.18, min:0.02, max:1, pas:0.02},
     {k:'etiq', label:'Étiquettes', type:'check', defaut:true},
+    {k:'legende', label:'Légende', type:'check', defaut:true},
     {k:'alerte', label:'Notification d\'absorption', type:'check', defaut:true},
     {k:'ext', label:'Volume piégé à l\'extrême' + FILET, type:'check', defaut:true},
     {k:'extK', label:'Volume mini (× médiane)', type:'number', defaut:5, min:1, max:50, pas:0.5},
@@ -468,7 +469,7 @@ var defAbs = {
   dessine:function(g, r){
     var C = calcul(g, r), F = g.cadre, e = g.echelle || 1, ctx = g.ctx, tick = g.tick || 0.25;
     var deb = g.premiere | 0, der = g.derniere | 0;
-    if(!C.pret && C.lu < 1) g.texte(F.gauche + 8 * e, F.haut + 14 * e, tr('Absorptions : lecture de la tape') + ' ' + Math.floor(100 * C.lu) + ' %', {couleur:'#8a929c', taille:10});
+    if(!C.pret && C.lu < 1 && r.legende) g.texte(F.gauche + 8 * e, F.haut + 14 * e, tr('Absorptions : lecture de la tape') + ' ' + Math.floor(100 * C.lu) + ' %', {couleur:'#8a929c', taille:10});
     [C.ev, C.tape].forEach(function(L){
       for(var k = 0; k < L.length; k++){
         var a = L[k];

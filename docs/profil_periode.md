@@ -52,7 +52,8 @@ Ce que ça change pour la décision : comparer la séance du jour à la valeur d
 | Couleur et opacité rangée POC | Rangée du POC en mode total, son cadre en mode empilé | orange, 0,6 |
 | **Ligne POC** | Affiche ou masque la ligne ; couleur, style (plein, tirets, pointillés, pointillés fins, tiret-point), épaisseur, opacité | orange, plein, 1,5 |
 | **Lignes VAH et VAL** | Mêmes réglages, communs aux deux lignes | bleu, tirets, 1 |
-| Étiquettes à gauche et légende | Prix des niveaux de la période en cours et légende | cochée |
+| Étiquettes à gauche | Prix des niveaux de la période en cours | cochée |
+| Légende | Ligne en haut du graphe : période en cours, et pourquoi elle est masquée | cochée |
 
 ### Limites connues
 
@@ -123,7 +124,8 @@ Labels below are those shown when Turning Trade is set to English.
 | POC row color and opacity | POC row in total mode, its outline in stacked mode | orange, 0.6 |
 | **POC line** | Shows or hides the line; color, style (solid, dashed, dotted, fine dots, dash-dot), thickness, opacity | orange, solid, 1.5 |
 | **VAH and VAL lines** | Same settings, shared by both lines | blue, dashed, 1 |
-| Left labels and caption | Prices of the current period's levels and caption | checked |
+| Left labels | Prices of the current period's levels | checked |
+| Legend | Line at the top of the chart: current period, and why it is hidden | checked |
 
 ### Known limits
 

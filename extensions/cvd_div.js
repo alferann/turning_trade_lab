@@ -91,7 +91,7 @@ var EN = {
   'UE  épuisement haussier':'UE  uptrend exhaustion', 'UA  absorption de l\'achat':'UA  uptrend absorption',
   'DE  épuisement baissier':'DE  downtrend exhaustion', 'DA  absorption de la vente':'DA  downtrend absorption',
   'Montrer les cassées (✗)':'Show broken ones (✗)', 'Couleur UE':'UE color', 'Couleur UA':'UA color', 'Couleur DE':'DE color', 'Couleur DA':'DA color',
-  'Écart marqueur → texte (px)':'Marker → text gap (px)', 'Étiquettes':'Labels', 'Taille du texte':'Text size', 'Texte en gras':'Bold text',
+  'Écart marqueur → texte (px)':'Marker → text gap (px)', 'Étiquettes':'Labels', 'Légende':'Legend', 'Taille du texte':'Text size', 'Texte en gras':'Bold text',
   'Point au pivot B':'Dot at pivot B', 'Rayon du point (px)':'Dot radius (px)', 'Triangle au pivot B':'Triangle at pivot B',
   'Taille du triangle':'Triangle size', 'Écart pivot → triangle (px)':'Pivot → triangle gap (px)',
   'Notifier les formations (?)':'Notify forming ones (?)', 'Notifier les confirmées':'Notify confirmed ones',
@@ -155,6 +155,7 @@ var FILTRES = [
 var TEXTE = [
   {k:'txtOff',label:'Écart marqueur → texte (px)',type:'number',defaut:12,min:0,max:60,pas:1},
   {k:'etiq',label:'Étiquettes',type:'check',defaut:true},
+  {k:'legende',label:'Légende',type:'check',defaut:true},
   {k:'fsize',label:'Taille du texte',type:'number',defaut:11,min:6,max:28,pas:1},
   {k:'gras',label:'Texte en gras',type:'check',defaut:true}
 ];
@@ -714,12 +715,12 @@ HFQExt.etude({
     var S = calcCache(g, r);
     if(!S) return;
     if(!S.aDelta){
-      g.texte(g.cadre.gauche + 8, g.cadre.haut + 14,
+      if(r.legende) g.texte(g.cadre.gauche + 8, g.cadre.haut + 14,
         tr('Divergences CVD : ce graphe ne sert aucun delta par barre'),
         {taille:11, align:'left', couleur:'#e0567f'});
       return;
     }
-    if(S.manque) g.texte(g.cadre.gauche + 8, g.cadre.haut + 14, tr('Divergences CVD : masquées sur une séance incomplète'), {taille:11, align:'left', couleur:'#e0567f'});
+    if(S.manque && r.legende) g.texte(g.cadre.gauche + 8, g.cadre.haut + 14, tr('Divergences CVD : masquées sur une séance incomplète'), {taille:11, align:'left', couleur:'#e0567f'});
     if(S.vide) return;
     dessinerPreTir(g, S, r, r);
     dessinerSignaux(g, S, r, r, function(s){
@@ -755,12 +756,12 @@ HFQExt.etude({
     var S = calcCache(g, P);
     if(!S) return;
     if(!S.aDelta){
-      g.texte(g.cadre.gauche + 8, g.cadre.haut + 14,
+      if(P.legende) g.texte(g.cadre.gauche + 8, g.cadre.haut + 14,
         tr('CVD : aucun delta par barre sur ce graphe'),
         {taille:11, align:'left', couleur:'#e0567f'});
       return;
     }
-    if(S.manque) g.texte(g.cadre.gauche + 8, g.cadre.haut + 14, tr('CVD : masqué sur une séance incomplète'), {taille:11, align:'left', couleur:'#e0567f'});
+    if(S.manque && P.legende) g.texte(g.cadre.gauche + 8, g.cadre.haut + 14, tr('CVD : masqué sur une séance incomplète'), {taille:11, align:'left', couleur:'#e0567f'});
     if(S.vide) return;
     var e = g.echelle || 1, c = g.ctx, i, F = g.cadre;
 

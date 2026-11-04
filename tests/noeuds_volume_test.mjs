@@ -262,7 +262,7 @@ const sierra = [pane('session', { title: 'Delta' }), pane('session', { title: 'V
   assert.equal(rec.length, 0, 'hors écran : rien');
 
   // Settings panel: one sub-section per node type, opened by a checkbox, colour last.
-  assert.deepEqual(Array.from(E.reglages.filter(x => x.type === 'check'), x => x.k), ['etiq', 'hvn', 'lvn', 'ledge', 'shelf']);
+  assert.deepEqual(Array.from(E.reglages.filter(x => x.type === 'check'), x => x.k), ['etiq', 'legende', 'hvn', 'lvn', 'ledge', 'shelf']);
   for (const t of ['hvn', 'lvn', 'ledge', 'shelf']) {
     const i = E.reglages.findIndex(x => x.k === t), j = E.reglages.findIndex(x => x.k === t + 'C');
     assert.ok(j > i && E.reglages.slice(i + 1, j).every(x => x.type === 'number'), 'sous-section ' + t);

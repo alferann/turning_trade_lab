@@ -33,7 +33,7 @@ var EN = {
   'Couleur hors Value Area':'Color outside the Value Area', 'Opacité hors Value Area':'Opacity outside the Value Area',
   'Couleur Value Area':'Value Area color', 'Opacité Value Area':'Value Area opacity', 'Couleur rangée POC':'POC row color', 'Opacité rangée POC':'POC row opacity',
   'Lignes depuis':'Lines from', 'Le bord gauche':'The left edge', 'Le profil seulement':'The profile only',
-  'Style':'Style', 'Pointillés fins':'Fine dots', 'Tiret-point':'Dash-dot', 'Étiquettes et légende':'Labels and caption',
+  'Style':'Style', 'Pointillés fins':'Fine dots', 'Tiret-point':'Dash-dot', 'Étiquettes':'Labels', 'Légende':'Legend',
   'Composite':'Composite', 'séances':'sessions', 'du':'from', 'au':'to', 'masqué':'hidden', 'séances disponibles':'sessions available',
   'Composite : profil de volume indisponible sur ce graphe':'Composite: volume profile unavailable on this chart'
 };
@@ -128,7 +128,7 @@ function peindre(c, Q, couleur, op, trait){
 function dessine(C, rang, g, r){
   var X = calcul(C, g, r), F = g.cadre, e = g.echelle || 1, c = g.ctx, t = g.tick || 0.25;
   var yTxt = F.haut + (12 + 13 * (LIGNE0 + rang)) * e;
-  if(X.raison){ g.texte(F.droite - 4 * e, yTxt, X.raison, {couleur:'#8a929c', taille:10, align:'right'}); return; }
+  if(X.raison){ if(r.legende) g.texte(F.droite - 4 * e, yTxt, X.raison, {couleur:'#8a929c', taille:10, align:'right'}); return; }
   var P = X.P, pas = P.tick || t, xR = F.droite - F.largeur * r.decal / 100, W = F.largeur * r.largeur / 100, k;
   var cotes = r.mode === 'empile' && P.hasSides && P.bids && P.asks, aVA = P.val != null && P.vah != null;
   var Q = {hors:[], va:[], poc:[], achat:[], vente:[], achatH:[], venteH:[], cadre:[]};
@@ -158,12 +158,11 @@ function dessine(C, rang, g, r){
   var x0 = r.lignes === 'gauche' ? F.gauche : xR - W, yp = g.y(P.poc), yh = g.y(P.vah), yl = g.y(P.val);
   if(r.pocL) g.trait([[x0, yp], [xR, yp]], {couleur:r.pocLC, epaisseur:+r.pocLE || 1.5, pointille:POINTILLE[r.pocLT] || null, opacite:+r.pocLO});
   if(r.vaL && aVA) g.trait([[x0, yh], [xR, yh], [NaN, NaN], [x0, yl], [xR, yl]], {couleur:r.vaLC, epaisseur:+r.vaLE || 1, pointille:POINTILLE[r.vaLT] || null, opacite:+r.vaLO});
-  if(!r.etiq) return;
   // Prix des niveaux au-dessus de leur ligne, a gauche du profil ; legende en haut a droite.
   var xl = xR - W - 4 * e, n = r.seances | 0, niv = [['POC', P.poc, r.pocL, r.pocLC], ['VAH', P.vah, r.vaL && aVA, r.vaLC], ['VAL', P.val, r.vaL && aVA, r.vaLC]];
-  for(k = 0; k < niv.length; k++) if(niv[k][2])
+  if(r.etiq) for(k = 0; k < niv.length; k++) if(niv[k][2])
     g.texte(xl, g.y(niv[k][1]) - 2 * e, niv[k][0] + ' ' + n + ' ' + prix(niv[k][1], t), {couleur:niv[k][3], taille:10, align:'right', base:'bottom'});
-  g.texte(F.droite - 4 * e, yTxt, X.titre, {couleur:'#8a929c', taille:10, align:'right'});
+  if(r.legende) g.texte(F.droite - 4 * e, yTxt, X.titre, {couleur:'#8a929c', taille:10, align:'right'});
 }
 
 function reglages(seances, decal){
@@ -196,7 +195,8 @@ function reglages(seances, decal){
     {k:'vaLT',     label:'Style', type:'select', defaut:'tirets', options:STYLES},
     {k:'vaLE',     label:'Épaisseur', type:'number', defaut:1, min:0.5, max:5, pas:0.5},
     {k:'vaLO',     label:'Opacité', type:'number', defaut:0.9, min:0, max:1, pas:0.05},
-    {k:'etiq',     label:'Étiquettes et légende', type:'check', defaut:true}
+    {k:'etiq',     label:'Étiquettes', type:'check', defaut:true},
+    {k:'legende',  label:'Légende', type:'check', defaut:true}
   ];
 }
 
