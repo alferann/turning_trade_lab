@@ -32,8 +32,12 @@ var DEFAUTS = [
 ];
 // ponytail: minutes de seance de RTH (09:30 a 16:00 ET) sur un graphe ETH ouvert a 18:00 ET (ES, NQ).
 var RTH = [930, 1320];
-// ponytail: hauteur mini d'une rangee en mode auto ; les ticks se regroupent au zoom arriere.
-var RANGEE_PX = 3;
+// Rangee en mode auto, la regle de Turning Trade : une rangee par point sur le
+// Nasdaq (NQ, MNQ : 4 ticks de 0,25), un tick ailleurs (demande du 2026-11-04).
+function pasAuto(sym, tick){
+  var r = String(sym || '').toUpperCase().replace(/[FGHJKMNQUVXZ]\d{1,2}$/, '');
+  return /^[MN]?NQ$/.test(r) ? Math.max(1, Math.round(1 / (+tick || 0.25))) : 1;
+}
 // ponytail: budget du premier calcul par image ; les seances closes qui restent se lisent aux images suivantes.
 var BUDGET_MS = 4;
 var POINTILLE = {plein:null, tirets:[6,4], points:[2,3], fins:[1,3], mixte:[8,3,2,3]};
@@ -609,10 +613,11 @@ function dessine(C, rang, g, r){
   if(masque) legende(g, r, X.cour, yTxt);
   if(!tous.length) return;
 
-  // Rangees d'au moins RANGEE_PX en auto ; colonne lue sur la projection.
+  // Rangees de `rangee` ticks, ou la regle de TT en auto, jamais sous un pixel
+  // par rangee au dezoom ; colonne lue sur la projection.
   R = tous[tous.length - 1];
   var hTick = Math.abs(g.y(R.poc * t) - g.y((R.poc + 1) * t));
-  var pas = r.rangee >= 1 ? r.rangee | 0 : Math.max(1, Math.ceil(RANGEE_PX * e / Math.max(hTick, 1e-9)));
+  var pas = r.rangee >= 1 ? r.rangee | 0 : Math.max(pasAuto(g.sym, t), Math.ceil(e / Math.max(hTick, 1e-9)));
   var col = Math.abs(g.x(g.premiere + 1) - g.x(g.premiere));
   var Q = {hors:[], va:[], poc:[], achat:[], vente:[], achatH:[], venteH:[], cadre:[]}, LP = [], LV = [], x0, x1;
   var wMax = F.largeur * (+r.largeurMax || 100) / 100;
@@ -714,7 +719,7 @@ function instance(lettre, rang, id, periode){
     graphes:['bougies','footprint'],
     reglages:reglages(periode),
     calcul:function(g, r){ return calcul(C, g, r); },
-    outils:{zoneValeur:zoneValeur, premierOuvre:premierOuvre, semaine:semaine, bornesET:bornesET},
+    outils:{zoneValeur:zoneValeur, premierOuvre:premierOuvre, semaine:semaine, bornesET:bornesET, pasAuto:pasAuto},
     dessine:function(g, r){ dessine(C, rang, g, r); }
   });
 }
