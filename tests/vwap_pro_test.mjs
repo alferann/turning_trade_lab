@@ -33,6 +33,8 @@ const servir = async () => { while (attente.length) attente.shift()(); for (let 
 assert.equal(defs.length, 6, 'six instances');
 assert.deepEqual(defs.map(d => d.id), ['vwap-pro-a', 'vwap-pro-b', 'vwap-pro-c', 'vwap-pro-d', 'vwap-pro-e', 'vwap-pro-f'], 'ids stables');
 const A = defs[0];
+// Reduced CME sessions (feriesUS type `reduit`) close at 13:00 ET: a week or month holding one is whole.
+assert.deepEqual([A.outils.finSeance('2026-09-07', 1380), A.outils.finSeance('2026-09-08', 1380), A.outils.finSeance('2026-11-26', 390)], [1140, 1380, 210], 'séance écourtée : fin à 13:00 ET');
 const defaut = Object.fromEntries(A.reglages.map(x => [x.k, x.defaut]));
 const avec = o => Object.assign({}, defaut, o);
 
@@ -413,20 +415,25 @@ const fin = (C, B, f) => C.vwap[B.findLastIndex(f)];
 //      session, its first served by the archive, the tick chart from the third: week and month equal the chart that
 //      holds the whole file. Masked while the archive is in flight, when its day is incomplete, or missing.
 {
-  const archive = (s, complete = true) => { const [y, mo, d] = s.date.split('-').map(Number), t0 = Date.UTC(y, mo - 1, d - 1, 23, 0) / 1000; return { day: s.date, complete, bars: s.bars.map(b => ({ t: t0 + 60 * b.m, o: b.o, h: b.h, l: b.l, c: b.c, v: 0, ladder: b.lv.map(l => [l[0], l[1], l[2], 0]) })) }; };
+  // The hub's archive is cut by UTC calendar day, not by session: the eve's 18:00 ET opening lands in the eve's file and
+  // a day's file ends with the first hours of the next session. One file per UTC day the sessions touch (EDT until
+  // 2026-11-01, EST after), `incomplets` the days flagged complete:false.
+  const t18 = date => { const [y, mo, d] = date.split('-').map(Number); return Date.UTC(y, mo - 1, d - 1, date < '2026-11-01' ? 22 : 23, 0) / 1000; };
+  const archives = (sessions, incomplets = []) => { const F = {}; for (const s of sessions) for (const b of s.bars) { const t = t18(s.date) + 60 * b.m, day = new Date(t * 1000).toISOString().slice(0, 10); (F[day] ??= { day, complete: !incomplets.includes(day), bars: [] }).bars.push({ t, o: b.o, h: b.h, l: b.l, c: b.c, v: 0, ladder: (b.lv || []).map(l => [l[0], l[1], l[2], 0]) }); } return F; };
+  const enHists = (sym, F) => Object.fromEntries(Object.entries(F).map(([d, f]) => ['/_hist/profile_' + sym + '_' + d + '.json.gz', f]));
   const egal = (a, b) => a.length === b.length && a.every((v, i) => Number.isNaN(v) ? Number.isNaN(b[i]) : Math.abs(v - b[i]) < 1e-6);
   // The archive is asked once the minute file is read: one round per file, as the chart redraws in TT.
   const lire = async (D, G, r) => { for (let k = 0; k < 3; k++) { D.calcul(G, r); await servir(); } return Array.from(D.calcul(G, r).vwap.subarray(0, BT.length)); };
   FICHIERS['_footprint_eth_AR.json'] = { sessions: R.slice(1) };
-  HISTS['/_hist/profile_AR_' + R[0].date + '.json.gz'] = archive(R[0]);
+  Object.assign(HISTS, enHists('AR', archives(R.slice(0, 2))));
   for (const anc of ['sem', 'mois']) {
     const r = avec({ anc }), ref = Array.from(A.calcul(ticks(BT, 'T1'), r).vwap.subarray(0, BT.length));
     if (anc === 'sem') assert.ok(Number.isNaN(defs[4].calcul(ticks(BT, 'AR'), r).vwap[0]), 'masqué avant la lecture');
     const tk = await lire(defs[4], ticks(BT, 'AR'), r);
     assert.ok(egal(tk, ref) && Number.isFinite(tk[BT.length - 1]), anc + ' : premier jour lu dans l\'archive = graphe qui tient tout le fichier');
   }
-  assert.equal(appels.filter(f => f.includes('profile_AR_')).length, 1, 'un seul jour demandé à l\'archive');
-  FICHIERS['_footprint_eth_AI.json'] = { sessions: R.slice(1) }; HISTS['/_hist/profile_AI_' + R[0].date + '.json.gz'] = archive(R[0], false);
+  assert.equal(appels.filter(f => f.includes('profile_AR_')).length, 2, 'deux fichiers demandés à l\'archive : la veille et le jour');
+  FICHIERS['_footprint_eth_AI.json'] = { sessions: R.slice(1) }; Object.assign(HISTS, enHists('AI', archives(R.slice(0, 2), [R[0].date])));
   FICHIERS['_footprint_eth_AM.json'] = { sessions: R.slice(1) };
   assert.ok(Number.isNaN((await lire(defs[5], ticks(BT, 'AI'), avec({ anc: 'mois' })))[BT.length - 1]), 'jour d\'archive incomplet : mois masqué');
   assert.ok(Number.isNaN((await lire(defs[1], ticks(BT, 'AM'), avec({ anc: 'mois' })))[BT.length - 1]), 'jour d\'archive absent : mois masqué');

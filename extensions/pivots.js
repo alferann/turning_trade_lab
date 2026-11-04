@@ -81,6 +81,23 @@ function ouvre(ms){
   return !FERMES[an][d.toISOString().slice(0, 10)];
 }
 
+// Fin de seance en minutes depuis l'ouverture : la cloture normale `dur`, ou
+// 13:00 ET les jours de seance ecourtee du CME (type `reduit` de
+// HFQSessions.feriesUS : Labor Day, Thanksgiving...), minute 1140 sur ETH,
+// 210 sur RTH (2026-11-04 : le Labor Day fini a 12:59 ET passait pour une
+// seance incomplete et masquait septembre).
+// ponytail: 13:00 ET pour tous les jours ecourtes ; les veilles de fete qui
+// ferment a 13:15 restent dans la marge de 4 h.
+var REDUITS = {};
+function finSeance(date, dur){
+  var an = String(date).slice(0, 4);
+  if(!REDUITS[an]){
+    REDUITS[an] = {};
+    try{ HFQSessions.feriesUS(+an).forEach(function(f){ if(f.type === 'reduit') REDUITS[an][f.date] = 1; }); }catch(_){}
+  }
+  return REDUITS[an][String(date).slice(0, 10)] ? Math.min(dur, dur <= 390 ? 210 : 1140) : dur;
+}
+
 // Jours ouvres strictement entre deux dates : une seance manque entre elles.
 function ouvresEntre(a, b){
   var d = jour(a), f = jour(b), n = 0;
@@ -129,8 +146,8 @@ function ajoute(p, b, i, rth){
 
 function periode(cle, debut, deb, date){ return {cle:cle, debut:debut, date:date || debut, deb:deb, fin:deb, nb:0, H:-Infinity, L:Infinity, O:null, C:null, m0:null, m1:null, complet:true, niv:null}; }
 
-// Vrai si les barres comptees de la seance couvrent la fenetre f [debut, fin) en minutes.
-function complete(p, f){ return p.O !== null && p.m0 <= f[0] + MARGE[0] && p.m1 >= f[1] - MARGE[1]; }
+// Vrai si les barres comptees de la seance couvrent la fenetre f [debut, fin) en minutes, fin ramenee a 13:00 ET un jour ecourte.
+function complete(p, f){ return p.O !== null && p.m0 <= f[0] + MARGE[0] && p.m1 >= finSeance(p.date, f[1]) - MARGE[1]; }
 
 function cleBarre(b){ return b ? (b._date || '') + ':' + b.m : ''; }
 
@@ -174,32 +191,67 @@ function minuteET(t){
   return (h >= 18 ? h - 18 : h + 6) * 60 + mi;
 }
 
-// Jour de l'archive minute, lu une fois : {pret, s}, s au format des seances
-// du fichier ({date, bars:[{m, o, h, l, c, v, lv}]}), null s'il manque ou
-// s'il est incomplet.
+// Date de seance (AAAA-MM-JJ) d'un horodatage unix en secondes : la seance
+// ouverte a 18:00 ET porte la date du lendemain.
+var FMTJ = null;
+function dateSeanceET(t){
+  if(!FMTJ) FMTJ = new Intl.DateTimeFormat('en-US', {timeZone:'America/New_York', year:'numeric', month:'2-digit', day:'2-digit'});
+  var y = '', mo = '', d = '';
+  FMTJ.formatToParts(new Date((t + 6 * 3600) * 1000)).forEach(function(x){ if(x.type === 'year') y = x.value; else if(x.type === 'month') mo = x.value; else if(x.type === 'day') d = x.value; });
+  return y + '-' + mo + '-' + d;
+}
+// Fichier de l'archive, lu une fois : {pret, j, puis}, j le
+// JSON ou null s'il manque, puis les suites a appeler a l'arrivee. Chaque
+// fichier est un jour calendaire UTC (00:00Z a 24:00Z), pas une seance
+// (2026-11-04) : la seance d'une date commence la veille a 18:00 ET, dans le
+// fichier de la veille, et le fichier d'une date finit par les premieres
+// heures de la seance suivante.
+var FICHIERS = {};
+function fichier(sym, date){
+  var k = racine(sym) + '|' + date, F = FICHIERS[k];
+  if(F) return F;
+  F = FICHIERS[k] = {pret:false, j:null, puis:[]};
+  var fini = function(){ F.pret = true; var L = F.puis; F.puis = []; for(var i = 0; i < L.length; i++) L[i](); };
+  try{
+    fetch('/_hist/profile_' + racine(sym) + '_' + date + '.json.gz', {cache:'no-cache'})
+      .then(function(rep){ if(!rep.ok) throw new Error('absent'); return rep.arrayBuffer(); })
+      .then(function(buf){ return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).json(); })
+      .then(function(j){ F.j = j; fini(); }, fini);
+  }catch(_){ fini(); }
+  return F;
+}
+// Barres de la seance `date` parmi celles des fichiers J, par date de seance,
+// au format des seances du fichier minute ({date, bars:[{m, o, h, l, c, v,
+// lv}]}) ; null si un fichier manque ou est incomplet.
+function convertir(J, date){
+  var bars = [];
+  for(var n = 0; n < J.length; n++){
+    var j = J[n];
+    if(!j || !Array.isArray(j.bars) || j.complete === false) return null;
+    for(var i = 0; i < j.bars.length; i++){
+      var b = j.bars[i], L, lv, q;
+      if(dateSeanceET(+b.t) !== date) continue;
+      L = b.ladder || []; lv = [];
+      for(q = 0; q < L.length; q++) lv.push([+L[q][0], +L[q][1] || 0, +L[q][2] || 0]);
+      bars.push({m:minuteET(+b.t), o:+b.o, h:+b.h, l:+b.l, c:+b.c, v:+b.v || 0, lv:lv});
+    }
+  }
+  return bars.length ? {date:date, bars:bars} : null;
+}
+// Seance d'une date assemblee depuis les fichiers de la veille et du jour,
+// lue une fois : {pret, s}.
 var HIST = {};
 function jourHist(sym, date){
   var k = racine(sym) + '|' + date, J = HIST[k];
   if(J) return J;
   J = HIST[k] = {pret:false, s:null};
-  var fini = function(){ J.pret = true; GEN++; redessiner(); };
-  try{
-    fetch('/_hist/profile_' + racine(sym) + '_' + date + '.json.gz', {cache:'no-cache'})
-      .then(function(rep){ if(!rep.ok) throw new Error('absent'); return rep.arrayBuffer(); })
-      .then(function(buf){ return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).json(); })
-      .then(function(j){ J.s = convertir(j, date); fini(); }, fini);
-  }catch(_){ J.pret = true; }
+  var A = fichier(sym, iso(jour(date) - 864e5)), B = fichier(sym, date);
+  var fini = function(){ if(!A.pret || !B.pret) return; J.s = convertir([A.j, B.j], date); J.pret = true; };
+  if(A.pret && B.pret){ fini(); return J; }
+  var puis = function(){ if(J.pret) return; fini(); if(J.pret){ GEN++; redessiner(); } };
+  if(!A.pret) A.puis.push(puis);
+  if(!B.pret) B.puis.push(puis);
   return J;
-}
-function convertir(j, date){
-  if(!j || !Array.isArray(j.bars) || j.complete === false) return null;
-  var bars = [];
-  for(var i = 0; i < j.bars.length; i++){
-    var b = j.bars[i], L = b.ladder || [], lv = [];
-    for(var q = 0; q < L.length; q++) lv.push([+L[q][0], +L[q][1] || 0, +L[q][2] || 0]);
-    bars.push({m:minuteET(+b.t), o:+b.o, h:+b.h, l:+b.l, c:+b.c, v:+b.v || 0, lv:lv});
-  }
-  return bars.length ? {date:date, bars:bars} : null;
 }
 
 // Jours ouvres de la semaine ou du mois d'une date, ou la veille ouvree ('jour').
@@ -352,7 +404,7 @@ var def = {
     {k:'etiq', label:'Étiquettes', type:'check', defaut:true}
   ].concat(sousSection('jour', 'Pivots journaliers', '#5aa9e6'), sousSection('sem', 'Pivots hebdomadaires', '#ffb347'), sousSection('mois', 'Pivots mensuels', '#e0567f')),
   calcul:calcul,
-  outils:{niveaux:niveaux, ouvres:ouvres, ouvresEntre:ouvresEntre, semaine:semaine, complete:complete, joursDe:joursDe, joursAvant:joursAvant, minuteET:minuteET},
+  outils:{niveaux:niveaux, ouvres:ouvres, ouvresEntre:ouvresEntre, semaine:semaine, complete:complete, finSeance:finSeance, joursDe:joursDe, joursAvant:joursAvant, minuteET:minuteET},
   dessine:function(g, r){
     var P = calcul(g, r), F = g.cadre, e = g.echelle || 1;
     var deb = Math.max(0, g.premiere | 0), fin = Math.min(g.derniere | 0, (g.n | 0) - 1);

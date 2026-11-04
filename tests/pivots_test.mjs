@@ -282,6 +282,16 @@ const de = (B, f) => hlc(B.filter(f));
   assert.ok(MG[1].niv === null && MG[2].cle === '2026-05' && MG[2].niv, 'mars partiel : rien en avril ; avril sans le Vendredi saint complet : pivots de mai');
 }
 
+// 6c. A reduced session (Labor Day, Thanksgiving: the CME closes at 13:00 ET, last bar at minute 1139) is complete,
+//     read in TT's calendar (feriesUS type `reduit`): its week gives pivots. The same last bar on an ordinary day masks.
+{
+  assert.deepEqual([E.outils.finSeance('2026-09-07', 1380), E.outils.finSeance('2026-09-08', 1380), E.outils.finSeance('2026-11-26', 390)], [1140, 1380, 210], 'fin de séance écourtée');
+  const court = (B, date) => B.map(b => b._date === date && b.m === 1379 ? Object.assign({}, b, { m: 1139 }) : b);
+  const B = synth(jours('2026-09-01', '2026-09-14')), w38 = E.outils.semaine('2026-09-14');
+  assert.ok(E.calcul(Object.assign(g(court(B, '2026-09-07'), 'eth', 0), { sym: 'LD1' }), defaut).sem.find(w => w.cle === w38).niv, 'Labor Day fini à 12:59 ET : semaine 37 complète, pivots de la 38');
+  assert.equal(E.calcul(Object.assign(g(court(B, '2026-09-08'), 'eth', 0), { sym: 'LD2' }), defaut).sem.find(w => w.cle === w38).niv, null, 'jour ordinaire fini à 12:59 ET : semaine masquée');
+}
+
 // 7. Completion from the files: a tick chart holding only its last sessions gets the previous day, week
 //    and month from the candles' minute file, then from the hub's per-day gzip archive for older days;
 //    masked while a file is in flight, and when a day is missing or incomplete there.
@@ -297,9 +307,14 @@ const de = (B, f) => hlc(B.filter(f));
       ? (f in HISTS ? { ok: true, arrayBuffer: async () => zlib.gzipSync(Buffer.from(JSON.stringify(HISTS[f]))) } : { ok: false })
       : { ok: true, json: () => FICHIERS[f] }))); } }));
   const F = defs2[0];
-  // One-minute sessions as the files hold them, and the same day as the per-day archive (unix seconds, EDT in October).
+  // One-minute sessions as the files hold them.
   const fichier = dates => ({ sessions: minutes(dates).reduce((S, b) => { (S.at(-1) && S.at(-1).date === b._date ? S.at(-1) : (S.push({ date: b._date, bars: [] }), S.at(-1))).bars.push(b); return S; }, []) });
-  const archive = (s, complete = true) => { const t0 = Date.UTC(2026, 8, 30, 22, 0) / 1000 + (new Date(s.date + 'T00:00:00Z') - new Date('2026-10-01T00:00:00Z')) / 1000; return { day: s.date, complete, bars: s.bars.map(b => ({ t: t0 + 60 * b.m, o: b.o, h: b.h, l: b.l, c: b.c, v: 1, ladder: [] })) }; };
+  // The hub's archive is cut by UTC calendar day, not by session: the eve's 18:00 ET opening lands in the eve's file and
+  // a day's file ends with the first hours of the next session. One file per UTC day the sessions touch (EDT until
+  // 2026-11-01, EST after), `incomplets` the days flagged complete:false.
+  const t18 = date => { const [y, mo, d] = date.split('-').map(Number); return Date.UTC(y, mo - 1, d - 1, date < '2026-11-01' ? 22 : 23, 0) / 1000; };
+  const archives = (sessions, incomplets = []) => { const F = {}; for (const s of sessions) for (const b of s.bars) { const t = t18(s.date) + 60 * b.m, day = new Date(t * 1000).toISOString().slice(0, 10); (F[day] ??= { day, complete: !incomplets.includes(day), bars: [] }).bars.push({ t, o: b.o, h: b.h, l: b.l, c: b.c, v: 0, ladder: (b.lv || []).map(l => [l[0], l[1], l[2], 0]) }); } return F; };
+  const enHists = (sym, F) => Object.fromEntries(Object.entries(F).map(([d, f]) => ['/_hist/profile_' + sym + '_' + d + '.json.gz', f]));
   assert.deepEqual([...F.outils.joursDe('mois', '2026-11-04')].slice(0, 2), ['2026-11-02', '2026-11-03'], 'jours ouvrés du mois');
   assert.equal(F.outils.joursAvant('mois', '2026-11-04').at(-1), '2026-10-30', 'le mois d\'avant finit le 30 octobre');
   assert.deepEqual([...F.outils.joursAvant('sem', '2026-11-04')], ['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30'], 'la semaine d\'avant');
@@ -311,7 +326,10 @@ const de = (B, f) => hlc(B.filter(f));
   const octobre = fichier(jours('2026-10-01', '2026-10-30')), nov = synth(jours('2026-11-02', '2026-11-04'));
   // The minute file starts on 2 October, the archive holds 1 October.
   FICHIERS['_footprint_eth_T9.json'] = { sessions: octobre.sessions.slice(1) };
-  HISTS['/_hist/profile_T9_2026-10-01.json.gz'] = archive(octobre.sessions[0]);
+  // The eve's file (30 September) opens the session of 1 October; the 1 October file ends with the evening of the 2nd.
+  const F9 = enHists('T9', archives(octobre.sessions.slice(0, 2)));
+  assert.ok(F9['/_hist/profile_T9_2026-09-30.json.gz'] && F9['/_hist/profile_T9_2026-10-01.json.gz'].bars.at(-1).t > t18('2026-10-02'), 'fixture : jours calendaires UTC');
+  Object.assign(HISTS, F9);
   const G = Object.assign(g(nov), { sym: 'T9', tf: '1000t' });
   let P = F.calcul(G, defaut);
   assert.deepEqual([P.mois[0].niv, P.sem[0].niv, P.jour[0].niv], [null, null, null], 'fichiers pas encore lus : masqué');
@@ -324,7 +342,7 @@ const de = (B, f) => hlc(B.filter(f));
   proche(prix(P.sem[0].niv).PP, (s44.H + s44.L + s44.C) / 3, 'wPP de la semaine 45 sur la 44, lue dans le fichier minute');
   proche(prix(P.jour[0].niv).PP, (v.H + v.L + v.C) / 3, 'PP du 2 novembre sur le 30 octobre');
   assert.ok(P.jour[1].niv && P.jour[2].niv, 'les séances suivantes gardent leurs pivots du graphe');
-  assert.ok(appels.filter(f => f.endsWith('.json.gz')).length === 1, 'un seul jour demandé à l\'archive');
+  assert.ok(appels.filter(f => f.endsWith('.json.gz')).length === 2, 'deux fichiers demandés à l\'archive : la veille et le jour');
   // Chart joined on Wednesday: its week and its first session come from the files for the next periods.
   const mer = Object.assign(g(nov.filter(b => b._date >= '2026-11-04')), { sym: 'T9', tf: '1000t' });
   P = await lire(F, mer, defaut);
@@ -337,7 +355,7 @@ const de = (B, f) => hlc(B.filter(f));
   const charger = (hists) => { const d = []; vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(x) { d.push(x); return true; }, redessiner() {} }, console, HFQSessions, Blob, Response, DecompressionStream, setTimeout,
     HFQSymGuard: { histFile: (t, s) => t + '_' + s + '.json' },
     fetch(f) { return new Promise(ok => attente.push(() => ok(f.endsWith('.json.gz') ? (f in hists ? { ok: true, arrayBuffer: async () => zlib.gzipSync(Buffer.from(JSON.stringify(hists[f]))) } : { ok: false }) : { ok: true, json: () => FICHIERS[f] }))); } })); return d[0]; };
-  for (const [nom, hists] of [['incomplet', { '/_hist/profile_T9_2026-10-01.json.gz': archive(octobre.sessions[0], false) }], ['absent', {}]]) {
+  for (const [nom, hists] of [['incomplet', enHists('T9', archives(octobre.sessions.slice(0, 2), ['2026-10-01']))], ['absent', {}]]) {
     const X = charger(hists), Q = await lire(X, G, defaut);
     assert.equal(Q.mois[0].niv, null, '1er octobre ' + nom + ' : mois masqué');
     assert.ok(Q.sem[0].niv && Q.jour[0].niv, nom + ' : semaine et veille, dans le fichier minute, tracées');
