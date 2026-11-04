@@ -215,22 +215,81 @@ function manquent(a, b){
   return n;
 }
 
-// Barres d'une minute que TT sert aux bougies (vingt seances glissantes), lues
-// une fois par fichier et partagees par les six instances. Un graphe en ticks
-// ne remonte qu'a deux semaines environ : elles completent la seance, la
-// fenetre, la semaine ou le mois de sa premiere barre.
+// Barres d'une minute que TT sert aux bougies (vingt-quatre seances
+// glissantes), lues une fois par fichier et partagees par les six instances,
+// completees pour les jours que le fichier ne tient plus par l'archive minute
+// par jour que le hub sert en gzip (_hist/profile_<ROOT>_<date>.json.gz, depuis
+// fin aout 2026) : `depuis` est le premier jour dont la periode a besoin
+// (2026-11-04 : le mois precedent n'est jamais entier dans le fichier). Un
+// graphe en ticks ne remonte qu'a deux semaines environ : elles completent la
+// seance, la fenetre, la semaine ou le mois de sa premiere barre.
 var MINUTES = {};
-function minutes(g){
+function racine(sym){ return String(sym || '').toUpperCase().replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''); }
+function iso(ms){ return new Date(ms).toISOString().slice(0, 10); }
+// Minute depuis 18:00 ET d'un horodatage unix en secondes, heure d'ete comprise.
+var FMT = null;
+function minuteET(t){
+  if(!FMT) FMT = new Intl.DateTimeFormat('en-US', {timeZone:'America/New_York', hour12:false, hour:'2-digit', minute:'2-digit'});
+  var h = 0, mi = 0;
+  FMT.formatToParts(new Date(t * 1000)).forEach(function(x){ if(x.type === 'hour') h = +x.value % 24; else if(x.type === 'minute') mi = +x.value; });
+  return (h >= 18 ? h - 18 : h + 6) * 60 + mi;
+}
+// Jour de l'archive au format des seances du fichier ; null s'il est incomplet.
+function convertir(j, date){
+  if(!j || !Array.isArray(j.bars) || j.complete === false) return null;
+  var bars = [];
+  for(var i = 0; i < j.bars.length; i++){
+    var b = j.bars[i], L = b.ladder || [], lv = [];
+    for(var q = 0; q < L.length; q++) lv.push([+L[q][0], +L[q][1] || 0, +L[q][2] || 0]);
+    bars.push({m:minuteET(+b.t), o:+b.o, h:+b.h, l:+b.l, c:+b.c, v:+b.v || 0, lv:lv});
+  }
+  return bars.length ? {date:date, bars:bars} : null;
+}
+function jourHist(M, sym, date){
+  var J = M.H[date] = {pret:false, s:null}, fini = function(){ J.pret = true; M.gen++; M.tout = null; redessiner(); };
+  try{
+    fetch('/_hist/profile_' + racine(sym) + '_' + date + '.json.gz', {cache:'no-cache'})
+      .then(function(rep){ if(!rep.ok) throw new Error('absent'); return rep.arrayBuffer(); })
+      .then(function(buf){ return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).json(); })
+      .then(function(j){ J.s = convertir(j, date); fini(); }, fini);
+  }catch(_){ J.pret = true; }
+}
+// Premier jour calendaire de la semaine ISO ou du mois d'une date.
+function premierJour(anc, date){
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(date);
+  if(!m) return date;
+  var t = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+  return iso(anc === 'sem' ? t - ((new Date(t).getUTCDay() + 6) % 7) * 864e5 : Date.UTC(+m[1], +m[2] - 1, 1));
+}
+function minutes(g, depuis){
   var f;
   try{ f = HFQSymGuard.histFile(g.seance === 'rth' ? '_footprint' : '_footprint_eth', g.sym); }catch(_){ return null; }
-  if(!MINUTES[f]){
-    var M = MINUTES[f] = {pret:false, S:[]}, fini = function(){ M.pret = true; redessiner(); };
+  var M = MINUTES[f];
+  if(!M){
+    M = MINUTES[f] = {pret:false, lu:false, S:[], H:{}, gen:0, tout:null, sessions:function(){ return tout(this); }};
+    var fini = function(){ M.lu = true; M.gen++; M.tout = null; redessiner(); };
     try{
       fetch(f, {cache:'no-cache'}).then(function(rep){ return rep.json(); })
         .then(function(j){ if(j && Array.isArray(j.sessions)) M.S = j.sessions; fini(); }, fini);
-    }catch(_){ M.pret = true; }
+    }catch(_){ M.lu = true; }
   }
-  return MINUTES[f];
+  // Les jours ouvres de `depuis` au premier du fichier, dans l'archive par jour.
+  if(M.lu && depuis){
+    var premier = M.S.length ? String(M.S[0].date || '').slice(0, 10) : aujourdhui(), t = Date.parse(depuis);
+    for(var d = t; isFinite(t) && iso(d) < premier && d < t + 45 * 864e5; d += 864e5) if(ouvre(d) && !M.H[iso(d)]) jourHist(M, g.sym, iso(d));
+  }
+  var pret = M.lu;
+  for(var k in M.H) if(!M.H[k].pret) pret = false;
+  M.pret = pret;
+  return M;
+}
+// Seances du fichier, precedees des jours de l'archive lus, par date.
+function tout(M){
+  if(M.tout) return M.tout;
+  var L = [], k;
+  for(k in M.H) if(M.H[k].s) L.push(M.H[k].s);
+  L.sort(function(a, b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+  return M.tout = L.concat(M.S);
 }
 
 // Ajoute a A les sommes d'une barre du fichier minute, comme calcul le fait d'une barre du graphe.
@@ -260,11 +319,11 @@ function amorce(C, g, r, b0, sig){
   var anc = r.anc, date0 = dateDe(b0), m0 = +b0.m, dur = DUREE[g.seance] || DUREE.eth, cal = anc === 'sem' || anc === 'mois';
   var F = SEANCES[anc] ? fenetreM(bornesET(anc, date0, r), OUVERTURE[g.seance] != null ? OUVERTURE[g.seance] : 1080) : null;
   if((F && !dansF(F, m0)) || ecart(anc, F, date0, m0, dur) < DEBUT_MAX) return null;
-  var M = minutes(g), k = sig + '|' + (M ? M.pret : '-');
+  var M = minutes(g, cal ? premierJour(anc, date0) : date0), k = sig + '|' + (M ? M.pret + ':' + M.gen : '-');
   if(C.amo && C.amo.k === k) return C.amo.A;
   // La seance de la premiere barre ne vient du fichier que si le graphe ne la prend pas dans l'heure.
   var A = {cle:cal ? periode(anc, date0) : 'j0', ok:false, V:0, PV:0, PV2:0}, besoin = ecart(anc, F, '', m0, dur) >= DEBUT_MAX;
-  var S = M && M.pret ? M.S : [], debut = !cal, ok = true, vu = false, prec = null;
+  var S = M && M.pret ? M.sessions() : [], debut = !cal, ok = true, vu = false, prec = null;
   for(var i = 0; i < S.length; i++){
     var d = String(S[i].date || '').slice(0, 10), B = S[i].bars || [];
     if(!B.length || d > date0 || (!cal && d !== date0)) continue;
