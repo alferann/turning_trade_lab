@@ -43,7 +43,7 @@ Ce que ça change pour la décision : comparer la séance du jour à la valeur d
 | Largeur au bord droit (% du graphe) | Longueur de la rangée la plus fournie du profil collé au bord droit | 25 |
 | Largeur sur la période (% de sa durée) | Longueur de la rangée la plus fournie d'un profil posé sur sa période | 60 |
 | Largeur maximale (% du graphe) | Plafond de la rangée la plus fournie de tous les profils, collés au bord droit ou posés sur leur période : un mois posé sur sa période ne couvre plus tout le graphe | 100 |
-| Ticks par rangée (0 = auto) | Regroupe les prix par rangées ; 0 : au moins 3 pixels par rangée, les ticks se regroupent quand on dézoome | 0 |
+| Ticks par rangée (0 = auto) | Regroupe les prix par rangées ; 0 : la règle de Turning Trade, une rangée par point sur le Nasdaq (NQ, MNQ : 4 ticks), un tick ailleurs, et jamais moins d'un pixel par rangée au dézoom | 0 |
 | **Histogramme** | Affiche ou masque les rangées | cochée |
 | Affichage du volume | Acheteurs et vendeurs empilés, ou total coloré par la Value Area | empilés |
 | Couleur et opacité acheteurs, vendeurs | Mode empilé | vert, rouge, 0,5 |
@@ -114,7 +114,7 @@ Labels below are those shown when Turning Trade is set to English.
 | Width at the right edge (% of chart) | Length of the fullest row of the profile pinned to the right edge | 25 |
 | Width on the period (% of its span) | Length of the fullest row of a profile set on its period | 60 |
 | Maximum width (% of chart) | Cap on the fullest row of every profile, pinned to the right edge or set on its period: a month set on its period no longer covers the whole chart | 100 |
-| Ticks per row (0 = auto) | Groups prices into rows; 0: at least 3 pixels per row, ticks merge when zooming out | 0 |
+| Ticks per row (0 = auto) | Groups prices into rows; 0: Turning Trade's rule, one row per point on the Nasdaq family (NQ, MNQ: 4 ticks), one tick elsewhere, and never under one pixel per row when zoomed out | 0 |
 | **Histogram** | Shows or hides the rows | checked |
 | Volume display | Buyers and sellers stacked, or total colored by the Value Area | stacked |
 | Buyers, sellers color and opacity | Stacked mode | green, red, 0.5 |

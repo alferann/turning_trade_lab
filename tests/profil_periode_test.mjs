@@ -69,6 +69,10 @@ const sem = d => E.outils.semaine(d);
   assert.deepEqual([Z.val, Z.vah], [1, 2], 'voisins ex aequo : le haut d\'abord');
 }
 
+// 1b. Auto row step follows Turning Trade: one point on the Nasdaq family, one tick elsewhere.
+assert.deepEqual(['NQZ6', 'MNQH7', 'NQ', 'ESZ6', 'MESZ6', 'CLF7', ''].map(s => E.outils.pasAuto(s, 0.25)), [4, 4, 4, 1, 1, 1, 1], 'pas auto par symbole');
+assert.equal(E.outils.pasAuto('NQZ6', 0.5), 2, 'pas auto suit le tick');
+
 // 2. Session profile on real ES: the last session, bid and ask per tick; VA holds 70 % and the POC.
 {
   const R = cour(g(), defaut), h = reference(last.bars);
@@ -567,7 +571,9 @@ if (fs.existsSync(path.join(PAYLOAD, 'hfq-composite-vp.js'))) {
   assert.equal(X.prec.length, 18, 'dix-huit séances précédentes');
   egal(X.prec[0], reference(parDate(B, d => d === '2026-09-22')), 'première séance');
   const t1 = performance.now(); for (let k = 0; k < 50; k++) { defs[2].dessine(G, rM); E.dessine(G, rJ); } const chaud = (performance.now() - t1) / 100;
-  assert.ok(chaud < 2, 'image en cache : ' + chaud.toFixed(3) + ' ms');
+  // One price unit per pixel here (a tick is 0.25 px): the auto step floors at 4 ticks, three times the rows of the
+  // former 3 px floor, hence the margin on this synthetic zoom-out.
+  assert.ok(chaud < 4, 'image en cache : ' + chaud.toFixed(3) + ' ms');
   // NQ-like load: eighty levels per one-minute bar, a session reads in 10 ms or more in one block. The cold
   // compute of "session + nine previous" and the live session, its last bar moving every frame, stay within
   // TT's rule: never three frames over 8 ms in a row.
