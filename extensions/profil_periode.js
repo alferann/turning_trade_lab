@@ -116,8 +116,12 @@ function semaine(cle){
 }
 function mois(cle){ return String(cle).slice(0, 7); }
 function aujourdhui(){ return new Date().toISOString().slice(0, 10); }
+// Date de seance AAAA-MM-JJ d'une barre : `_date` des bougies, sinon `_sd`,
+// que le footprint pose sur ses barres (2026-11-04 : sans elle, semaine et
+// mois y repartaient a chaque seance et les fenetres se lisaient au jour meme).
+function dateDe(b){ return b ? String(b._date || b._sd || '').slice(0, 10) : ''; }
 // Cle d'une barre, pour reconnaitre la derniere lue a son index.
-function cleBarre(b){ return b ? (b._date || '') + ':' + b.m : ''; }
+function cleBarre(b){ return b ? dateDe(b) + ':' + b.m : ''; }
 function maintenant(){ return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now(); }
 function redessiner(){
   try{ if(typeof setTimeout !== 'undefined' && HFQExt.redessiner) setTimeout(function(){ HFQExt.redessiner(); }, 0); }catch(_){}
@@ -229,7 +233,7 @@ function manquent(a, b){
 // des instances.
 function seances(S, g, fin){
   var n = g.n | 0, b0 = n ? g.barre(0) : null, b, c;
-  var sig = [g.sym, g.tf, g.seance, g.tick, b0 ? (b0._date || '') + ':' + b0.m : ''].join('|');
+  var sig = [g.sym, g.tf, g.seance, g.tick, cleBarre(b0)].join('|');
   if(sig !== S.sig || (S.n && n >= S.n && cleBarre(g.barre(S.n - 1)) !== S.der)){ S.sig = sig; S.gen++; S.n = 0; S.J = []; S.prev = null; S.H = {}; S.L = {}; S.O = {}; }
   var J = S.J;
   if(n < S.n){
@@ -244,7 +248,8 @@ function seances(S, g, fin){
     if(!(i & 2047) && i > S.n && maintenant() > fin) break;
     b = g.barre(i);
     if(!b) continue;
-    if(!prev || (b._date != null ? b._date !== prev._date : +b.m < +prev.m)) J.push({date:b._date ? String(b._date).slice(0, 10) : '', deb:i, fin:i, m0:+b.m, m1:+b.m});
+    var date = dateDe(b);
+    if(!prev || (date ? date !== dateDe(prev) : +b.m < +prev.m)) J.push({date:date, deb:i, fin:i, m0:+b.m, m1:+b.m});
     c = J[J.length - 1]; c.fin = i; c.m1 = +b.m;
     prev = b;
   }
