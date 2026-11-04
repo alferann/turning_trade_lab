@@ -199,6 +199,23 @@ function ouvre(ms){
   return !FERMES[an][d.toISOString().slice(0, 10)];
 }
 
+// Fin de seance en minutes depuis l'ouverture : la cloture normale `dur`, ou
+// 13:00 ET les jours de seance ecourtee du CME (type `reduit` de
+// HFQSessions.feriesUS : Labor Day, Thanksgiving...), minute 1140 sur ETH,
+// 210 sur RTH (2026-11-04 : le Labor Day fini a 12:59 ET passait pour une
+// seance incomplete et masquait septembre).
+// ponytail: 13:00 ET pour tous les jours ecourtes ; les veilles de fete qui
+// ferment a 13:15 restent dans la marge de 4 h.
+var REDUITS = {};
+function finSeance(date, dur){
+  var an = String(date).slice(0, 4);
+  if(!REDUITS[an]){
+    REDUITS[an] = {};
+    try{ HFQSessions.feriesUS(+an).forEach(function(f){ if(f.type === 'reduit') REDUITS[an][f.date] = 1; }); }catch(_){}
+  }
+  return REDUITS[an][String(date).slice(0, 10)] ? Math.min(dur, dur <= 390 ? 210 : 1140) : dur;
+}
+
 // Vrai si la date est le premier jour ouvre de sa semaine ou de son mois.
 function premierOuvre(anc, date){
   var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(date);
@@ -234,25 +251,62 @@ function minuteET(t){
   FMT.formatToParts(new Date(t * 1000)).forEach(function(x){ if(x.type === 'hour') h = +x.value % 24; else if(x.type === 'minute') mi = +x.value; });
   return (h >= 18 ? h - 18 : h + 6) * 60 + mi;
 }
-// Jour de l'archive au format des seances du fichier ; null s'il est incomplet.
-function convertir(j, date){
-  if(!j || !Array.isArray(j.bars) || j.complete === false) return null;
-  var bars = [];
-  for(var i = 0; i < j.bars.length; i++){
-    var b = j.bars[i], L = b.ladder || [], lv = [];
-    for(var q = 0; q < L.length; q++) lv.push([+L[q][0], +L[q][1] || 0, +L[q][2] || 0]);
-    bars.push({m:minuteET(+b.t), o:+b.o, h:+b.h, l:+b.l, c:+b.c, v:+b.v || 0, lv:lv});
-  }
-  return bars.length ? {date:date, bars:bars} : null;
+// Date de seance (AAAA-MM-JJ) d'un horodatage unix en secondes : la seance
+// ouverte a 18:00 ET porte la date du lendemain.
+var FMTJ = null;
+function dateSeanceET(t){
+  if(!FMTJ) FMTJ = new Intl.DateTimeFormat('en-US', {timeZone:'America/New_York', year:'numeric', month:'2-digit', day:'2-digit'});
+  var y = '', mo = '', d = '';
+  FMTJ.formatToParts(new Date((t + 6 * 3600) * 1000)).forEach(function(x){ if(x.type === 'year') y = x.value; else if(x.type === 'month') mo = x.value; else if(x.type === 'day') d = x.value; });
+  return y + '-' + mo + '-' + d;
 }
-function jourHist(M, sym, date){
-  var J = M.H[date] = {pret:false, s:null}, fini = function(){ J.pret = true; M.gen++; M.tout = null; redessiner(); };
+// Fichier de l'archive, lu une fois et partage par les instances : {pret, j, puis}, j le
+// JSON ou null s'il manque, puis les suites a appeler a l'arrivee. Chaque
+// fichier est un jour calendaire UTC (00:00Z a 24:00Z), pas une seance
+// (2026-11-04) : la seance d'une date commence la veille a 18:00 ET, dans le
+// fichier de la veille, et le fichier d'une date finit par les premieres
+// heures de la seance suivante.
+var FICHIERS = {};
+function fichier(sym, date){
+  var k = racine(sym) + '|' + date, F = FICHIERS[k];
+  if(F) return F;
+  F = FICHIERS[k] = {pret:false, j:null, puis:[]};
+  var fini = function(){ F.pret = true; var L = F.puis; F.puis = []; for(var i = 0; i < L.length; i++) L[i](); };
   try{
     fetch('/_hist/profile_' + racine(sym) + '_' + date + '.json.gz', {cache:'no-cache'})
       .then(function(rep){ if(!rep.ok) throw new Error('absent'); return rep.arrayBuffer(); })
       .then(function(buf){ return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).json(); })
-      .then(function(j){ J.s = convertir(j, date); fini(); }, fini);
-  }catch(_){ J.pret = true; }
+      .then(function(j){ F.j = j; fini(); }, fini);
+  }catch(_){ fini(); }
+  return F;
+}
+// Barres de la seance `date` parmi celles des fichiers J, par date de seance,
+// au format des seances du fichier minute ({date, bars:[{m, o, h, l, c, v,
+// lv}]}) ; null si un fichier manque ou est incomplet.
+function convertir(J, date){
+  var bars = [];
+  for(var n = 0; n < J.length; n++){
+    var j = J[n];
+    if(!j || !Array.isArray(j.bars) || j.complete === false) return null;
+    for(var i = 0; i < j.bars.length; i++){
+      var b = j.bars[i], L, lv, q;
+      if(dateSeanceET(+b.t) !== date) continue;
+      L = b.ladder || []; lv = [];
+      for(q = 0; q < L.length; q++) lv.push([+L[q][0], +L[q][1] || 0, +L[q][2] || 0]);
+      bars.push({m:minuteET(+b.t), o:+b.o, h:+b.h, l:+b.l, c:+b.c, v:+b.v || 0, lv:lv});
+    }
+  }
+  return bars.length ? {date:date, bars:bars} : null;
+}
+// Seance d'une date assemblee depuis les fichiers de la veille et du jour.
+function jourHist(M, sym, date){
+  var J = M.H[date] = {pret:false, s:null};
+  var A = fichier(sym, iso(Date.parse(date) - 864e5)), B = fichier(sym, date);
+  var fini = function(){ if(!A.pret || !B.pret) return; J.s = convertir([A.j, B.j], date); J.pret = true; };
+  if(A.pret && B.pret){ fini(); return; }
+  var puis = function(){ if(J.pret) return; fini(); if(J.pret){ M.gen++; M.tout = null; redessiner(); } };
+  if(!A.pret) A.puis.push(puis);
+  if(!B.pret) B.puis.push(puis);
 }
 // Premier jour calendaire de la semaine ISO ou du mois d'une date.
 function premierJour(anc, date){
@@ -340,7 +394,7 @@ function amorce(C, g, r, b0, sig){
       sommes(A, B[j], r.src);
     }
     // Chaque seance entamee dans l'heure ; une veille jusqu'a sa fin, le jour meme jusqu'a l'heure qui precede la premiere barre du graphe.
-    if(d < date0 || besoin) ok = ok && e0 !== null && ecart(anc, F, '', e0, dur) < DEBUT_MAX && (d < date0 ? e1 >= dur - FIN_MAX : e1 + 1 >= m0 - DEBUT_MAX);
+    if(d < date0 || besoin) ok = ok && e0 !== null && ecart(anc, F, '', e0, dur) < DEBUT_MAX && (d < date0 ? e1 >= finSeance(d, dur) - FIN_MAX : e1 + 1 >= m0 - DEBUT_MAX);
     prec = d;
   }
   A.ok = debut && ok && prec !== null && (prec === date0 || (!besoin && !manquent(prec, date0)));
@@ -422,7 +476,7 @@ function calcul(C, g, r, fin){
     // ponytail: seule la premiere periode du graphe se complete par le fichier minute ; plus loin, une seance entamee en retard (jour partiel d'un graphe en ticks) est masquee, et un trou au milieu d'une seance sans barre de comblement passe inapercu.
     var ok = !!cle && !b._trou;
     if(ok && !suite) ok = ecart(r.anc, F, date, +b.m, dur) < DEBUT_MAX || (A0 === A && A.ok);
-    else if(ok) ok = C.ok[i - 1] === 1 && (C.sessAt[i - 1] === sess || (+prev.m >= dur - FIN_MAX && +b.m < DEBUT_MAX && !manquent(dateDe(prev), date)));
+    else if(ok) ok = C.ok[i - 1] === 1 && (C.sessAt[i - 1] === sess || (+prev.m >= finSeance(dateDe(prev), dur) - FIN_MAX && +b.m < DEBUT_MAX && !manquent(dateDe(prev), date)));
     C.ok[i] = ok ? 1 : 0;
     if(ok && C.V[i] > 0){
       var vw = C.PV[i] / C.V[i];
@@ -501,7 +555,7 @@ function instance(lettre, d){
     graphes:['bougies','footprint'],
     reglages:reglages(d),
     calcul:function(g, r){ return calcul(C, g, r); },
-    outils:{versET:versET, bornesET:bornesET, semaine:semaine},
+    outils:{versET:versET, bornesET:bornesET, semaine:semaine, finSeance:finSeance},
     dessine:function(g, r){
       // Rien n'est dessine tant que le calcul a froid n'a pas rattrape le graphe.
       calcul(C, g, r, maintenant() + BUDGET_MS);

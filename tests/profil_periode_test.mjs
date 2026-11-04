@@ -28,6 +28,8 @@ const defs = charger();
 assert.deepEqual(defs.map(d => d.id), ['profil-periode', 'profil-periode-b', 'profil-periode-c', 'profil-periode-d'], 'ids stables');
 assert.deepEqual(defs.map(d => d.reglages[0].defaut), ['jour', 'sem', 'mois', 'us'], 'période par défaut de chaque instance');
 const E = defs[0];
+// Reduced CME sessions (feriesUS type `reduit`) close at 13:00 ET: a week or month holding one is whole.
+assert.deepEqual([E.outils.finSeance('2026-09-07', 1380), E.outils.finSeance('2026-09-08', 1380), E.outils.finSeance('2026-11-26', 390)], [1140, 1380, 210], 'séance écourtée : fin à 13:00 ET');
 const defaut = Object.fromEntries(E.reglages.map(x => [x.k, x.defaut]));
 const avec = o => Object.assign({}, defaut, o);
 
@@ -260,21 +262,25 @@ const synth = (dates, M = [0, 1, 1379]) => dates.flatMap((date, s) => [0, 1, 2].
     fetch: f => new Promise(ok => attente.push(() => ok(f.endsWith('.json.gz') ? (f in HISTS ? { ok: true, arrayBuffer: async () => zlib.gzipSync(Buffer.from(JSON.stringify(HISTS[f]))) } : { ok: false }) : { ok: true, json: () => FICHIERS[f] }))) })[0];
   const servir = async () => { attente.splice(0).forEach(x => x()); for (let k = 0; k < 10; k++) await new Promise(r => setTimeout(r, 2)); };
   const session = date => ({ date, bars: B.filter(b => b._date === date).map(({ _date, ...b }) => b) });
-  // Unix seconds from 18:00 ET of the eve (EDT in October); ladders as the archive writes them.
-  const archive = (date, complete = true) => { const [y, mo, d] = date.split('-').map(Number), t0 = Date.UTC(y, mo - 1, d - 1, 22, 0) / 1000; return { day: date, complete, bars: session(date).bars.map(b => ({ t: t0 + 60 * b.m, o: b.o, h: b.h, l: b.l, c: b.c, v: 0, ladder: b.lv.map(l => [l[0], l[1], l[2], 0]) })) }; };
+  // The hub's archive is cut by UTC calendar day, not by session: the eve's 18:00 ET opening lands in the eve's file and
+  // a day's file ends with the first hours of the next session. One file per UTC day the sessions touch (EDT until
+  // 2026-11-01, EST after), `incomplets` the days flagged complete:false.
+  const t18 = date => { const [y, mo, d] = date.split('-').map(Number); return Date.UTC(y, mo - 1, d - 1, date < '2026-11-01' ? 22 : 23, 0) / 1000; };
+  const archives = (sessions, incomplets = []) => { const F = {}; for (const s of sessions) for (const b of s.bars) { const t = t18(s.date) + 60 * b.m, day = new Date(t * 1000).toISOString().slice(0, 10); (F[day] ??= { day, complete: !incomplets.includes(day), bars: [] }).bars.push({ t, o: b.o, h: b.h, l: b.l, c: b.c, v: 0, ladder: (b.lv || []).map(l => [l[0], l[1], l[2], 0]) }); } return F; };
+  const enHists = (sym, F) => Object.fromEntries(Object.entries(F).map(([d, f]) => ['/_hist/profile_' + sym + '_' + d + '.json.gz', f]));
   const oct = jours('2026-10-01', '2026-10-14'), M = avec({ periode: 'mois' });
   const plein = cour(g(B.filter(b => b._date >= '2026-10-01')), M, D);
   // The archive is asked once the minute file is read: one round per file, as the chart redraws in TT.
   const lire = async G => { for (let k = 0; k < 3; k++) { cour(G, M, D); await servir(); } return cour(G, M, D); };
   FICHIERS['_footprint_eth_AR.json'] = { sessions: oct.slice(2).map(session) };
-  HISTS['/_hist/profile_AR_2026-10-01.json.gz'] = archive('2026-10-01'); HISTS['/_hist/profile_AR_2026-10-02.json.gz'] = archive('2026-10-02');
+  Object.assign(HISTS, enHists('AR', archives(oct.slice(0, 3).map(session))));
   const G = g(B.filter(b => b._date >= '2026-10-06'), { sym: 'AR', tf: '1000t' });
   assert.equal(cour(G, M, D).partiel, '2026-10-06', 'masqué tant que rien n\'est lu');
   const C = await lire(G);
   assert.equal(C.partiel, null, 'octobre complété par le fichier et l\'archive');
   assert.deepEqual([plat(C), C.poc, C.vah, C.val], [plat(plein), plein.poc, plein.vah, plein.val], 'octobre complété = graphe entier');
   FICHIERS['_footprint_eth_AI.json'] = { sessions: oct.slice(2).map(session) };
-  HISTS['/_hist/profile_AI_2026-10-01.json.gz'] = archive('2026-10-01', false); HISTS['/_hist/profile_AI_2026-10-02.json.gz'] = archive('2026-10-02');
+  Object.assign(HISTS, enHists('AI', archives(oct.slice(0, 3).map(session), ['2026-10-01'])));
   assert.equal((await lire(g(B.filter(b => b._date >= '2026-10-06'), { sym: 'AI', tf: '1000t' }))).partiel, '2026-10-06', 'jour d\'archive incomplet : masqué');
   FICHIERS['_footprint_eth_AM.json'] = { sessions: oct.slice(2).map(session) };
   assert.equal((await lire(g(B.filter(b => b._date >= '2026-10-06'), { sym: 'AM', tf: '1000t' }))).partiel, '2026-10-06', 'jour d\'archive absent : masqué');
