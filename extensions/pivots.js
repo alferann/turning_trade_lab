@@ -134,6 +134,124 @@ function complete(p, f){ return p.O !== null && p.m0 <= f[0] + MARGE[0] && p.m1 
 
 function cleBarre(b){ return b ? (b._date || '') + ':' + b.m : ''; }
 
+// --- Completion par les fichiers (2026-11-04, demande de l'utilisateur) ---
+// Un graphe en ticks ne tient que ses dernieres seances, et le mois precedent
+// n'y est jamais entier : la veille, la semaine ou le mois qui precede la
+// premiere periode du graphe, et les jours qui manquent a cette premiere
+// periode, se lisent dans le fichier minute des bougies (vingt-quatre seances
+// glissantes), puis, pour les jours plus anciens, dans l'archive minute par
+// jour que le hub sert en gzip (_hist/profile_<ROOT>_<date>.json.gz). Un jour
+// absent ou incomplet masque la periode : rien sur des donnees manquantes.
+function redessiner(){
+  try{ if(typeof setTimeout !== 'undefined' && HFQExt.redessiner) setTimeout(function(){ HFQExt.redessiner(); }, 0); }catch(_){}
+}
+// Change a chaque fichier arrive : les caches qui en dependent se recalculent.
+var GEN = 0;
+function racine(sym){ return String(sym || '').toUpperCase().replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''); }
+function iso(ms){ return new Date(ms).toISOString().slice(0, 10); }
+
+// Fichier minute des bougies, lu une fois par fetch : seances par date.
+var MINUTES = {};
+function minutes(g){
+  var f;
+  try{ f = HFQSymGuard.histFile(g.seance === 'rth' ? '_footprint' : '_footprint_eth', g.sym); }catch(_){ return null; }
+  if(!MINUTES[f]){
+    var M = MINUTES[f] = {pret:false, S:{}}, fini = function(){ M.pret = true; GEN++; redessiner(); };
+    try{
+      fetch(f, {cache:'no-cache'}).then(function(rep){ return rep.json(); })
+        .then(function(j){ if(j && Array.isArray(j.sessions)) j.sessions.forEach(function(x){ M.S[String(x.date || '').slice(0, 10)] = x; }); fini(); }, fini);
+    }catch(_){ M.pret = true; }
+  }
+  return MINUTES[f];
+}
+
+// Minute depuis 18:00 ET d'un horodatage unix en secondes, heure d'ete comprise.
+var FMT = null;
+function minuteET(t){
+  if(!FMT) FMT = new Intl.DateTimeFormat('en-US', {timeZone:'America/New_York', hour12:false, hour:'2-digit', minute:'2-digit'});
+  var h = 0, mi = 0;
+  FMT.formatToParts(new Date(t * 1000)).forEach(function(x){ if(x.type === 'hour') h = +x.value % 24; else if(x.type === 'minute') mi = +x.value; });
+  return (h >= 18 ? h - 18 : h + 6) * 60 + mi;
+}
+
+// Jour de l'archive minute, lu une fois : {pret, s}, s au format des seances
+// du fichier ({date, bars:[{m, o, h, l, c, v, lv}]}), null s'il manque ou
+// s'il est incomplet.
+var HIST = {};
+function jourHist(sym, date){
+  var k = racine(sym) + '|' + date, J = HIST[k];
+  if(J) return J;
+  J = HIST[k] = {pret:false, s:null};
+  var fini = function(){ J.pret = true; GEN++; redessiner(); };
+  try{
+    fetch('/_hist/profile_' + racine(sym) + '_' + date + '.json.gz', {cache:'no-cache'})
+      .then(function(rep){ if(!rep.ok) throw new Error('absent'); return rep.arrayBuffer(); })
+      .then(function(buf){ return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).json(); })
+      .then(function(j){ J.s = convertir(j, date); fini(); }, fini);
+  }catch(_){ J.pret = true; }
+  return J;
+}
+function convertir(j, date){
+  if(!j || !Array.isArray(j.bars) || j.complete === false) return null;
+  var bars = [];
+  for(var i = 0; i < j.bars.length; i++){
+    var b = j.bars[i], L = b.ladder || [], lv = [];
+    for(var q = 0; q < L.length; q++) lv.push([+L[q][0], +L[q][1] || 0, +L[q][2] || 0]);
+    bars.push({m:minuteET(+b.t), o:+b.o, h:+b.h, l:+b.l, c:+b.c, v:+b.v || 0, lv:lv});
+  }
+  return bars.length ? {date:date, bars:bars} : null;
+}
+
+// Jours ouvres de la semaine ou du mois d'une date, ou la veille ouvree ('jour').
+function joursDe(T, date){
+  var t = jour(date), out = [], d, fin, x;
+  if(t === null) return out;
+  if(T === 'jour'){ for(d = t - 864e5; d > t - 15 * 864e5; d -= 864e5) if(ouvre(d)) return [iso(d)]; return out; }
+  x = new Date(t);
+  if(T === 'sem'){ d = t - ((x.getUTCDay() + 6) % 7) * 864e5; fin = d + 5 * 864e5; }
+  else { d = Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), 1); fin = Date.UTC(x.getUTCFullYear(), x.getUTCMonth() + 1, 1); }
+  for(; d < fin; d += 864e5) if(ouvre(d)) out.push(iso(d));
+  return out;
+}
+// Jours ouvres de la periode qui precede celle de la date.
+function joursAvant(T, date){
+  if(T === 'jour') return joursDe('jour', date);
+  var t = jour(date), x = new Date(t), d = T === 'sem' ? t - ((x.getUTCDay() + 6) % 7) * 864e5 : Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), 1);
+  return joursDe(T, iso(d - 864e5));
+}
+
+// Periode assemblee jour par jour : la seance du graphe quand elle couvre sa
+// fenetre, sinon le fichier minute, sinon l'archive par jour. {p, attente} :
+// p null si un jour manque ou est incomplet, attente tant qu'un fichier se lit.
+var FICH = {};
+function periodeFichiers(g, J, dates, rth, f, cle){
+  var k = [g.sym, g.seance, cle, rth, GEN].join('|'), c = FICH[k];
+  if(c) return c;
+  var p = periode(cle, dates[0] || '', -1, dates[0] || ''), attente = false, ok = dates.length > 0;
+  for(var i = 0; i < dates.length && ok; i++){
+    var d = dates[i], s = null, j, q;
+    for(j = 0; j < J.length; j++) if(J[j].date === d){ s = J[j]; break; }
+    if(s && !(s.O !== null && complete(s, f))) s = null;
+    if(!s){
+      var M = minutes(g), src = M && M.pret ? M.S[d] : null;
+      if(M && !M.pret) attente = true;
+      else if(!src){ var H = jourHist(g.sym, d); if(!H.pret) attente = true; else src = H.s; }
+      if(src && src.bars){
+        s = periode(d, d, 0, d);
+        for(q = 0; q < src.bars.length; q++) ajoute(s, src.bars[q], q, rth);
+        if(!(s.O !== null && complete(s, f))) s = null;
+      }
+    }
+    if(!s){ ok = false; break; }
+    p.nb++;
+    if(p.O === null) p.O = s.O;
+    p.C = s.C;
+    if(s.H > p.H) p.H = s.H;
+    if(s.L < p.L) p.L = s.L;
+  }
+  return FICH[k] = {p:ok && !attente ? p : null, attente:attente && ok};
+}
+
 // Seances du graphe, barre de debut et de fin, haut, bas, ouverture et
 // cloture. Incremental : si le graphe a seulement grandi, la derniere barre
 // connue est reprise et seules les nouvelles sont lues. Si elle n'est plus a
@@ -186,7 +304,7 @@ function regroupe(J, cleDe){
 // recalculent qu'a chaque nouvelle barre ou changement de formule.
 function calcul(g, r){
   var rth = !!r.rth && g.seance === 'eth', J = seances(SEANCES, g, rth);
-  var cle = SEANCES.sig + '|' + SEANCES.gen + '|' + SEANCES.n + '|' + r.formule;
+  var cle = SEANCES.sig + '|' + SEANCES.gen + '|' + SEANCES.n + '|' + r.formule + '|' + GEN;
   if(cle === CACHE.cle) return CACHE.P;
   var f = rth ? RTH : [0, DUREE[g.seance] || DUREE.eth];
   for(var j = 0; j < J.length; j++) J[j].complet = complete(J[j], f);
@@ -197,6 +315,21 @@ function calcul(g, r){
   for(var T in P) for(var k = 0; k < P[T].length; k++){
     var a = P[T][k - 1];
     P[T][k].niv = !a || a.O === null || !a.complet || (T === 'jour' ? ouvresEntre(a.date, P[T][k].date) : a.nb < ouvres(T, a.debut)) ? null : niveaux(r.formule, a.H, a.L, a.C, a.O);
+  }
+  // Par les fichiers : la premiere periode du graphe recoit les pivots de celle
+  // d'avant, et la deuxieme ceux de la premiere quand le graphe l'a prise en
+  // cours de route (jours d'avant sa premiere barre lus dans les fichiers).
+  for(T in P){
+    var L = P[T], d0 = L.length ? L[0].date : '', R;
+    if(!d0) continue;
+    if(!L[0].niv){
+      R = periodeFichiers(g, J, joursAvant(T, d0), rth, f, T + '|avant|' + d0);
+      if(R.p) L[0].niv = niveaux(r.formule, R.p.H, R.p.L, R.p.C, R.p.O);
+    }
+    if(L.length > 1 && !L[1].niv){
+      R = periodeFichiers(g, J, T === 'jour' ? [d0] : joursDe(T, d0), rth, f, T + '|premiere|' + d0);
+      if(R.p && (T !== 'jour' || !ouvresEntre(d0, L[1].date))) L[1].niv = niveaux(r.formule, R.p.H, R.p.L, R.p.C, R.p.O);
+    }
   }
   CACHE.cle = cle; CACHE.P = P;
   return P;
@@ -219,7 +352,7 @@ var def = {
     {k:'etiq', label:'Étiquettes', type:'check', defaut:true}
   ].concat(sousSection('jour', 'Pivots journaliers', '#5aa9e6'), sousSection('sem', 'Pivots hebdomadaires', '#ffb347'), sousSection('mois', 'Pivots mensuels', '#e0567f')),
   calcul:calcul,
-  outils:{niveaux:niveaux, ouvres:ouvres, ouvresEntre:ouvresEntre, semaine:semaine, complete:complete},
+  outils:{niveaux:niveaux, ouvres:ouvres, ouvresEntre:ouvresEntre, semaine:semaine, complete:complete, joursDe:joursDe, joursAvant:joursAvant, minuteET:minuteET},
   dessine:function(g, r){
     var P = calcul(g, r), F = g.cadre, e = g.echelle || 1;
     var deb = Math.max(0, g.premiere | 0), fin = Math.min(g.derniere | 0, (g.n | 0) - 1);

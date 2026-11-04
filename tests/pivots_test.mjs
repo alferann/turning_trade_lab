@@ -281,3 +281,66 @@ const de = (B, f) => hlc(B.filter(f));
   const MG = E.calcul(Object.assign(g(synth(P)), { sym: 'GF' }), defaut).mois;
   assert.ok(MG[1].niv === null && MG[2].cle === '2026-05' && MG[2].niv, 'mars partiel : rien en avril ; avril sans le Vendredi saint complet : pivots de mai');
 }
+
+// 7. Completion from the files: a tick chart holding only its last sessions gets the previous day, week
+//    and month from the candles' minute file, then from the hub's per-day gzip archive for older days;
+//    masked while a file is in flight, and when a day is missing or incomplete there.
+{
+  const zlib = await import('node:zlib');
+  const FICHIERS = {}, HISTS = {}, attente = [], appels = [];
+  // The gzip archive goes through web streams: give the pending reads a few turns of the loop.
+  const servir = async () => { while (attente.length) attente.shift()(); for (let k = 0; k < 10; k++) await new Promise(r => setTimeout(r, 2)); };
+  const defs2 = [];
+  vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(d) { defs2.push(d); return true; }, redessiner() {} }, console, HFQSessions, Blob, Response, DecompressionStream, setTimeout,
+    HFQSymGuard: { histFile: (t, s) => t + '_' + s + '.json' },
+    fetch(f) { appels.push(f); return new Promise(ok => attente.push(() => ok(f.endsWith('.json.gz')
+      ? (f in HISTS ? { ok: true, arrayBuffer: async () => zlib.gzipSync(Buffer.from(JSON.stringify(HISTS[f]))) } : { ok: false })
+      : { ok: true, json: () => FICHIERS[f] }))); } }));
+  const F = defs2[0];
+  // One-minute sessions as the files hold them, and the same day as the per-day archive (unix seconds, EDT in October).
+  const fichier = dates => ({ sessions: minutes(dates).reduce((S, b) => { (S.at(-1) && S.at(-1).date === b._date ? S.at(-1) : (S.push({ date: b._date, bars: [] }), S.at(-1))).bars.push(b); return S; }, []) });
+  const archive = (s, complete = true) => { const t0 = Date.UTC(2026, 8, 30, 22, 0) / 1000 + (new Date(s.date + 'T00:00:00Z') - new Date('2026-10-01T00:00:00Z')) / 1000; return { day: s.date, complete, bars: s.bars.map(b => ({ t: t0 + 60 * b.m, o: b.o, h: b.h, l: b.l, c: b.c, v: 1, ladder: [] })) }; };
+  assert.deepEqual([...F.outils.joursDe('mois', '2026-11-04')].slice(0, 2), ['2026-11-02', '2026-11-03'], 'jours ouvrés du mois');
+  assert.equal(F.outils.joursAvant('mois', '2026-11-04').at(-1), '2026-10-30', 'le mois d\'avant finit le 30 octobre');
+  assert.deepEqual([...F.outils.joursAvant('sem', '2026-11-04')], ['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30'], 'la semaine d\'avant');
+  assert.deepEqual([...F.outils.joursAvant('jour', '2026-11-02')], ['2026-10-30'], 'la veille ouvrée d\'un lundi');
+  assert.equal(F.outils.minuteET(Date.UTC(2026, 8, 30, 22, 0) / 1000), 0, '18:00 EDT : minute 0');
+  assert.equal(F.outils.minuteET(Date.UTC(2026, 10, 3, 23, 0) / 1000), 0, '18:00 EST : minute 0');
+  assert.equal(F.outils.minuteET(Date.UTC(2026, 9, 1, 20, 59) / 1000), 1379, '16:59 EDT : minute 1379');
+
+  const octobre = fichier(jours('2026-10-01', '2026-10-30')), nov = synth(jours('2026-11-02', '2026-11-04'));
+  // The minute file starts on 2 October, the archive holds 1 October.
+  FICHIERS['_footprint_eth_T9.json'] = { sessions: octobre.sessions.slice(1) };
+  HISTS['/_hist/profile_T9_2026-10-01.json.gz'] = archive(octobre.sessions[0]);
+  const G = Object.assign(g(nov), { sym: 'T9', tf: '1000t' });
+  let P = F.calcul(G, defaut);
+  assert.deepEqual([P.mois[0].niv, P.sem[0].niv, P.jour[0].niv], [null, null, null], 'fichiers pas encore lus : masqué');
+  // The archive is asked only once the minute file is read: one round per file, as the chart redraws in TT.
+  const lire = async (X, G, r) => { for (let k = 0; k < 3; k++) { X.calcul(G, r); await servir(); } return X.calcul(G, r); };
+  P = await lire(F, G, defaut);
+  const barsDe = f => octobre.sessions.filter(f).flatMap(s => s.bars);
+  const oct = hlc(barsDe(() => true)), s44 = hlc(barsDe(s => s.date >= '2026-10-26')), v = hlc(barsDe(s => s.date === '2026-10-30'));
+  proche(prix(P.mois[0].niv).PP, (oct.H + oct.L + oct.C) / 3, 'mPP de novembre sur octobre entier, 1er octobre lu dans l\'archive');
+  proche(prix(P.sem[0].niv).PP, (s44.H + s44.L + s44.C) / 3, 'wPP de la semaine 45 sur la 44, lue dans le fichier minute');
+  proche(prix(P.jour[0].niv).PP, (v.H + v.L + v.C) / 3, 'PP du 2 novembre sur le 30 octobre');
+  assert.ok(P.jour[1].niv && P.jour[2].niv, 'les séances suivantes gardent leurs pivots du graphe');
+  assert.ok(appels.filter(f => f.endsWith('.json.gz')).length === 1, 'un seul jour demandé à l\'archive');
+  // Chart joined on Wednesday: its week and its first session come from the files for the next periods.
+  const mer = Object.assign(g(nov.filter(b => b._date >= '2026-11-04')), { sym: 'T9', tf: '1000t' });
+  P = await lire(F, mer, defaut);
+  proche(prix(P.sem[0].niv).PP, (s44.H + s44.L + s44.C) / 3, 'mercredi seul : semaine 44 par les fichiers');
+  // RTH only: file bars outside 09:30-16:00 are left out.
+  const octR = hlc(barsDe(() => true).filter(b => b.m >= 930 && b.m < 1320));
+  proche(prix((await lire(F, G, avec({ rth: true }))).mois[0].niv).PP, (octR.H + octR.L + octR.C) / 3, 'RTH seul sur les fichiers');
+  // An incomplete archive day masks the month; a missing one too.
+  const defs3 = [];
+  const charger = (hists) => { const d = []; vm.runInContext(SRC, vm.createContext({ HFQExt: { etude(x) { d.push(x); return true; }, redessiner() {} }, console, HFQSessions, Blob, Response, DecompressionStream, setTimeout,
+    HFQSymGuard: { histFile: (t, s) => t + '_' + s + '.json' },
+    fetch(f) { return new Promise(ok => attente.push(() => ok(f.endsWith('.json.gz') ? (f in hists ? { ok: true, arrayBuffer: async () => zlib.gzipSync(Buffer.from(JSON.stringify(hists[f]))) } : { ok: false }) : { ok: true, json: () => FICHIERS[f] }))); } })); return d[0]; };
+  for (const [nom, hists] of [['incomplet', { '/_hist/profile_T9_2026-10-01.json.gz': archive(octobre.sessions[0], false) }], ['absent', {}]]) {
+    const X = charger(hists), Q = await lire(X, G, defaut);
+    assert.equal(Q.mois[0].niv, null, '1er octobre ' + nom + ' : mois masqué');
+    assert.ok(Q.sem[0].niv && Q.jour[0].niv, nom + ' : semaine et veille, dans le fichier minute, tracées');
+  }
+}
+
