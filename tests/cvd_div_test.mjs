@@ -174,9 +174,15 @@ assert.ok(froid < 8 && ms < 8, 'budget 8 ms, mesuré froid ' + froid.toFixed(2) 
 
 // 10b. Footprint: TT passes the whole history as premiere..derniere. Only the framed bars, one on each side,
 // plus the 300-bar lead for the pivots, are computed, and only they make up the pane's CVD line.
+// The archive is cut after its last full session: a session being recorded, or joined late, is masked by the
+// study and would leave no line to measure.
 {
   ({ prix, cvd } = charger()); surch = {};
-  const rec = [], F = Object.assign(g(bars, 0, N - 1, rec), { x: i => (i - N + 40) * 40 + 20, cadre: { gauche: 0, droite: 1000, haut: 0, bas: 500 } });
+  const pleine = s => s.bars[0].m === 0 && s.bars.at(-1).m >= 1320 && s.bars.every((b, k) => !k || b.m - s.bars[k - 1].m <= 11);
+  const BC = [];
+  for (const s of db.sessions.slice(0, db.sessions.findLastIndex(pleine) + 1)) for (const b of s.bars) BC.push(Object.assign({ _date: s.date }, b));
+  const NC = BC.length;
+  const rec = [], F = Object.assign(g(BC, 0, NC - 1, rec), { x: i => (i - NC + 40) * 40 + 20, cadre: { gauche: 0, droite: 1000, haut: 0, bas: 500 } });
   const rf = defaut(prix), rl = Object.assign(defaut(cvd), { style: 'ligne' });
   const t = performance.now(); prix.dessine(F, rf); cvd.dessine(F, rl); const fp = performance.now() - t;
   const ligne = rec.find(x => x.k === 'trait' && x.o.couleur === rl.ccvd).p.filter(p => isFinite(p[0]));
@@ -242,11 +248,12 @@ function tapeReelle(sym, date) {
 }
 {
   // The last archived session whose recorded tape covers more than 50 minutes (the current one may have
-  // just opened), the chart cut after it: only that day gets wicks, exactly where the per-minute tape delta
+  // just opened), taken from its open and without a gap, since the study masks a session from its first
+  // missing minute; the chart cut after it: only that day gets wicks, exactly where the per-minute tape delta
   // equals the levels.
   const prevues = s => {
     const R = tapeReelle('ES', s.date);
-    if (!R) return null;
+    if (!R || s.bars[0].m !== 0 || !s.bars.every((b, k) => !k || b.m - s.bars[k - 1].m <= 11)) return null;
     const B = bars.slice(0, bars.findIndex(b => b._date === s.date) + s.bars.length), parMin = new Map(), attendu = {};
     for (let k = 0; k < R.cs.length; k++) {
       const m = Math.floor(R.cs[k] / 6000), e = parMin.get(m) || { run: 0, h: 0, l: 0 };
