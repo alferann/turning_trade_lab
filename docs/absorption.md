@@ -56,6 +56,7 @@ Les réglages généraux, puis une sous-section par signature ouverte par sa cas
 | Absorption haussière / baissière | Couleurs | bleu / orange |
 | Opacité des zones | Opacité du remplissage | 0,18 |
 | Étiquettes | Signatures et volumes sous ou sur les marqueurs | cochée |
+| Légende | Avancement de la lecture de la tape, en haut à gauche | cochée |
 | Notification d'absorption | Notification de bureau à chaque nouvelle absorption | cochée |
 | **Volume piégé à l'extrême** | Case à cocher de la signature | cochée |
 | Volume mini (× médiane) | Seuil du volume agressif sur l'extrême | 5 |
@@ -157,6 +158,7 @@ General settings, then one subsection per signature opened by its checkbox.
 | Bullish / bearish absorption | Colours | blue / orange |
 | Zone opacity | Fill opacity | 0.18 |
 | Labels | Signatures and volumes under or over the markers | checked |
+| Legend | Tape reading progress, top left | checked |
 | Absorption notification | Desktop notification for each new absorption | checked |
 | **Volume trapped at the extreme** | Signature checkbox | checked |
 | Minimum volume (× median) | Threshold of the aggressive volume on the extreme | 5 |

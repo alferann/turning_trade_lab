@@ -92,6 +92,7 @@ Les réglages de détection, de filtrage et de couleur vivent sur l'étude **Div
 | Point au pivot B, rayon | prix | Marqueur sur le prix |
 | Triangle au pivot B, taille, écart | volet | Marqueur sur le CVD |
 | Écart marqueur → texte, étiquettes, taille, gras | les deux | Texte |
+| Légende : les avertissements en haut à gauche (séance incomplète, aucun delta), sur le prix et dans le volet | les deux | Texte |
 | Notifier les formations, les confirmées | prix | Alertes de bureau |
 | Style du CVD, axes, couleurs des bougies | volet | Dessin du delta cumulé |
 | Mèches (tape de la séance) | volet | Mèches des chandeliers, là où la tape couvre la barre |
@@ -202,6 +203,7 @@ Detection, filter and colour settings live on **Divergences CVD · prix**. The C
 | Dot at pivot B, radius | price | Marker on price |
 | Triangle at pivot B, size, gap | pane | Marker on CVD |
 | Marker → text gap, labels, size, bold | both | Text |
+| Legend: the top-left warnings (incomplete session, no delta), on the price and in the pane | both | Text |
 | Notify forming ones, confirmed ones | price | Desktop alerts |
 | CVD style, axes, candle colors | pane | Cumulative delta drawing |
 | Wicks (session tape) | pane | Candle wicks, where the tape covers the bar |

@@ -37,7 +37,8 @@ Ce que ça change pour la décision : une cible ou une zone de réaction tirée 
 | Couleurs et opacités | Acheteurs, vendeurs, hors Value Area, Value Area, rangée du POC ; opacité relative hors Value Area | vert, rose, gris, bleu, orange ; 0,4 |
 | Lignes depuis | Le profil seulement, ou le bord gauche du graphe | le profil |
 | Ligne POC, lignes VAH et VAL | Couleur, style, épaisseur, opacité | orange plein, bleu en tirets |
-| Étiquettes et légende | Prix des niveaux et légende en haut à droite | oui |
+| Étiquettes | Prix des niveaux | oui |
+| Légende | Ligne en haut à droite : séances couvertes, ou pourquoi le composite est masqué | oui |
 
 Avec les défauts, B se colle à gauche de A, C à gauche de B, D à gauche de C.
 
@@ -88,7 +89,8 @@ What it changes for a decision: a target or reaction zone taken from a horizon b
 | Colors and opacities | Buyers, sellers, outside the value area, value area, POC row; relative opacity outside the value area | green, pink, grey, blue, orange; 0.4 |
 | Lines from | The profile only, or the chart's left edge | the profile |
 | POC line, VAH and VAL lines | Color, style, width, opacity | solid orange, dashed blue |
-| Labels and caption | Level prices and caption top right | on |
+| Labels | Level prices | on |
+| Legend | Line top right: sessions covered, or why the composite is hidden | on |
 
 With the defaults, B sits left of A, C left of B, D left of C.
 

@@ -55,7 +55,7 @@ var EN = {
   'Nœuds du profil de volume':'Volume profile nodes', 'Profil analysé':'Profile analyzed',
   'Panneaux de profil ouverts':'Open profile panels', 'Séance (SVP)':'Session (SVP)',
   'Fenêtre visible (CVP)':'Visible window (CVP)', 'Composite N séances (CMP)':'Composite N sessions (CMP)',
-  'Lissage (rangées)':'Smoothing (rows)', 'Opacité des zones':'Zone opacity',
+  'Lissage (rangées)':'Smoothing (rows)', 'Opacité des zones':'Zone opacity', 'Légende':'Legend',
   'Proéminence mini (% du POC)':'Minimum prominence (% of POC)', 'Murs mini (× le creux)':'Minimum walls (× the trough)',
   'Rapport mini côté épais / côté mince':'Minimum thick side / thin side ratio', 'Rangées comparées de chaque côté':'Rows compared on each side',
   'Hauteur mini (rangées)':'Minimum height (rows)', 'Écart toléré sur le palier (%)':'Tolerated spread on the plateau (%)',
@@ -328,7 +328,8 @@ var def = {
     {k:'source', label:'Profil analysé', type:'select', defaut:'tous', options:[['tous','Panneaux de profil ouverts'],['session','Séance (SVP)'],['visible','Fenêtre visible (CVP)'],['rolling','Composite N séances (CMP)']]},
     {k:'lissage', label:'Lissage (rangées)', type:'number', defaut:2, min:0, max:8, pas:1},
     {k:'opac', label:'Opacité des zones', type:'number', defaut:0.1, min:0, max:0.5, pas:0.02},
-    {k:'etiq', label:'Étiquettes', type:'check', defaut:true}
+    {k:'etiq', label:'Étiquettes', type:'check', defaut:true},
+    {k:'legende', label:'Légende', type:'check', defaut:true}
   ].concat(
     sousSection('hvn', 'HVN : nœuds de volume élevé', [{k:'hvnProm', label:'Proéminence mini (% du POC)', type:'number', defaut:15, min:1, max:100, pas:1}], '#ff8c0a'),
     sousSection('lvn', 'LVN : nœuds de volume faible', [{k:'lvnMur', label:'Murs mini (× le creux)', type:'number', defaut:2, min:1.2, max:20, pas:0.1}], '#9a6fd0'),
@@ -342,13 +343,13 @@ var def = {
   outils:{detecter:detecter, lisser:lisser, manque:manque},
   dessine:function(g, r){
     var R = calcul(g, r), F = g.cadre, e = g.echelle || 1, etiq = [];
-    if(R.raison){ g.texte(F.gauche + 8 * e, F.haut + 14 * e, tr(R.raison), {couleur:'#8a929c', taille:10}); return; }
+    if(R.raison){ if(r.legende) g.texte(F.gauche + 8 * e, F.haut + 14 * e, tr(R.raison), {couleur:'#8a929c', taille:10}); return; }
     var suffixe = R.profils.length > 1, ligne = 0;
     for(var p = 0; p < R.profils.length; p++){
       var N = R.profils[p].noeuds, nom = suffixe ? ' · ' + R.profils[p].nom : '';
       // Profil masque : sa raison, une ligne par profil, a la place de ses noeuds.
       if(!N){
-        g.texte(F.gauche + 8 * e, F.haut + (14 + 13 * ligne++) * e, tr(R.profils[p].raison) + (R.profils[p].detail ? ' (' + R.profils[p].detail + ')' : '') + nom, {couleur:'#8a929c', taille:10});
+        if(r.legende) g.texte(F.gauche + 8 * e, F.haut + (14 + 13 * ligne++) * e, tr(R.profils[p].raison) + (R.profils[p].detail ? ' (' + R.profils[p].detail + ')' : '') + nom, {couleur:'#8a929c', taille:10});
         continue;
       }
       // Des zones larges aux traits fins, pour que les ledges restent au-dessus.

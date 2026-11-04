@@ -79,7 +79,7 @@ var EN = {
   'Opacité relative hors Value Area':'Relative opacity outside the Value Area',
   'Couleur hors Value Area':'Color outside the Value Area', 'Opacité hors Value Area':'Opacity outside the Value Area',
   'Opacité Value Area':'Value Area opacity', 'Couleur rangée POC':'POC row color', 'Opacité rangée POC':'POC row opacity',
-  'Style':'Style', 'Pointillés fins':'Fine dots', 'Tiret-point':'Dash-dot', 'Étiquettes à gauche et légende':'Left labels and caption',
+  'Style':'Style', 'Pointillés fins':'Fine dots', 'Tiret-point':'Dash-dot', 'Étiquettes à gauche':'Left labels', 'Légende':'Legend',
   'partiel, depuis le':'partial, since', 'des barres sans niveaux':'of bars without levels',
   'Profil de période : barres sans date, profil de séance seulement':'Period profile: undated bars, session profile only',
   'Profil de période : aucune barre de la période ne porte de niveaux':'Period profile: no bar of the period carries levels',
@@ -606,11 +606,11 @@ function dessine(C, rang, g, r){
   if(!X) return;
   // Une ligne de texte par instance en haut du graphe, pour ne pas se chevaucher.
   var yTxt = F.haut + (12 + 13 * rang) * e;
-  if(X.raison) g.texte(F.gauche + 8 * e, yTxt, tr(X.raison), {couleur:'#8a929c', taille:10});
+  if(X.raison && r.legende) g.texte(F.gauche + 8 * e, yTxt, tr(X.raison), {couleur:'#8a929c', taille:10});
   // Rien de dessine sur une periode en cours incomplete : seule la legende dit pourquoi.
   var masque = X.cour && (X.cour.partiel || X.cour.incomplet || X.cour.sans);
   var tous = X.cour && !masque ? X.prec.concat([X.cour]) : X.prec;
-  if(masque) legende(g, r, X.cour, yTxt);
+  if(masque && r.legende) legende(g, r, X.cour, yTxt);
   if(!tous.length) return;
 
   // Rangees de `rangee` ticks, ou la regle de TT en auto, jamais sous un pixel
@@ -655,7 +655,7 @@ function dessine(C, rang, g, r){
     for(k = 0; k < niv.length; k++) if(niv[k][2])
       g.texte(xl, g.y(niv[k][1] * t) - 2 * e, nom(niv[k][0]) + ' ' + prix(niv[k][1], t), {couleur:niv[k][3], taille:10, base:'bottom'});
   }
-  if(r.etiq) legende(g, r, R, yTxt);
+  if(r.legende) legende(g, r, R, yTxt);
 }
 
 // Legende de la periode en cours, et pourquoi elle est masquee.
@@ -703,7 +703,8 @@ function reglages(periode){
     {k:'vaLT',     label:'Style', type:'select', defaut:'tirets', options:STYLES},
     {k:'vaLE',     label:'Épaisseur', type:'number', defaut:1, min:0.5, max:5, pas:0.5},
     {k:'vaLO',     label:'Opacité', type:'number', defaut:0.9, min:0, max:1, pas:0.05},
-    {k:'etiq',     label:'Étiquettes à gauche et légende', type:'check', defaut:true}
+    {k:'etiq',     label:'Étiquettes à gauche', type:'check', defaut:true},
+    {k:'legende',  label:'Légende', type:'check', defaut:true}
   ];
 }
 

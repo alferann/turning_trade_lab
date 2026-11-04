@@ -46,6 +46,7 @@ Pour la décision : chercher les réactions aux bords (ledges, bords d'un HVN) p
 | Lissage (rangées) | L ; 0 pour le profil brut | 2 |
 | Opacité des zones | Remplissage ; 0 pour des traits seuls | 0,10 |
 | Étiquettes | Noms des nœuds au bord droit | cochée |
+| Légende | Raison d'un profil masqué, en haut à gauche | cochée |
 | **HVN** | Case à cocher : affiche les HVN | cochée |
 | Proéminence mini (% du POC) | X : plus haut, seules les vraies distributions restent | 15 |
 | **LVN** | Case à cocher : affiche les LVN | cochée |
@@ -117,6 +118,7 @@ For the decision: look for reactions at the edges (ledges, HVN edges) rather tha
 | Smoothing (rows) | L; 0 for the raw profile | 2 |
 | Zone opacity | Fill; 0 for lines only | 0.10 |
 | Labels | Node names at the right edge | checked |
+| Legend | Why a profile is hidden, top left | checked |
 | **HVN** | Checkbox: shows HVN | checked |
 | Minimum prominence (% of POC) | X: higher keeps only real distributions | 15 |
 | **LVN** | Checkbox: shows LVN | checked |
