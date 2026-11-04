@@ -41,8 +41,9 @@ const completeRth = bs => bs.length > 0 && bs[0].m <= 930 + 60 && bs[bs.length -
 // No weekday strictly between two session dates: the previous session is the previous weekday.
 const contigus = (a, b) => { for (let d = new Date(a + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1) < new Date(b + 'T00:00:00Z');) if (d.getUTCDay() % 6) return false; return true; };
 const veille = k => k > 0 && complete(db.sessions[k - 1].bars) && contigus(db.sessions[k - 1].date, db.sessions[k].date);
-// Last archive session whose previous one is the previous weekday and covers its session (and its RTH window): the reference day below.
-const K = db.sessions.findLastIndex((s, k) => veille(k) && completeRth(rthDe(db.sessions[k - 1])));
+// Last archive session of at least 300 bars (the drawing cases frame its last 300 bars and expect one day) whose
+// previous one is the previous weekday and covers its session (and its RTH window): the reference day below.
+const K = db.sessions.findLastIndex((s, k) => s.bars.length >= 300 && veille(k) && completeRth(rthDe(db.sessions[k - 1])));
 assert.ok(K > 0, 'une séance de l\'archive avec une veille complète');
 const finK = db.sessions.slice(0, K + 1).reduce((n, s) => n + s.bars.length, 0);
 const barsK = bars.slice(0, finK);
