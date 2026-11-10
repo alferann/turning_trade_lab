@@ -19,6 +19,7 @@
 | Confluence Scanner | `extensions/confluence.js` | VWAP, profils de volume et TPO, pivots, veille, ouvertures et plages calculés sur le graphe, regroupés par proximité et notés ; les zones s'allument quand le prix approche | [`docs/confluence.md`](docs/confluence.md) |
 | Composite de volume | `extensions/composites.js` | Profil de volume roulant des N dernières séances, celui du Volume composite de Turning Trade, sur le Market Profile, les bougies et le footprint ; quatre instances à poser côte à côte (par exemple 30 séances au bord droit, 14 à sa gauche) | [`docs/composites.md`](docs/composites.md) |
 | Bougies hors bande VWAP | `extensions/bougies_vwap.js` | Cache les bougies qui touchent la bande entre deux écarts-types de la VWAP journalière ou RTH ; notification à chaque clôture au-delà d'un écart choisi, VWAP comprise | [`docs/bougies_vwap.md`](docs/bougies_vwap.md) |
+| Ligne à distance du prix | `extensions/ligne_distance.js` | Un trait horizontal à une distance choisie du dernier prix, en ticks ou en points, au-dessus, en dessous ou les deux, du bord droit jusqu'à la bougie visible la plus récente qui le touche, mèche comprise | [`docs/ligne_distance.md`](docs/ligne_distance.md) |
 
 ## Installer
 
@@ -43,6 +44,7 @@ node tests/profil_periode_test.mjs
 node tests/confluence_test.mjs
 node tests/composites_test.mjs
 node tests/bougies_vwap_test.mjs
+node tests/ligne_distance_test.mjs
 node tests/niveaux_sessions_test.mjs   # charge aussi les sessions du monde de Turning Trade (TT_PAYLOAD)
 node tests/i18n_test.mjs   # anglais de toutes les études, comparé au dictionnaire de Turning Trade (TT_PAYLOAD)
 ```
@@ -76,6 +78,7 @@ Third-party studies for [Turning Trade](https://turningtrade.com), the futures t
 | Confluence Scanner | `extensions/confluence.js` | VWAP, volume and TPO profiles, pivots, previous session, opens and ranges computed on the chart, grouped by proximity and scored; zones light up as price approaches | [`docs/confluence.md`](docs/confluence.md) |
 | Volume Composite | `extensions/composites.js` | Rolling volume profile of the last N sessions, the one behind Turning Trade's Volume composite, on the Market Profile, candles and footprint; four instances to set side by side (for instance 30 sessions at the right edge, 14 next to it) | [`docs/composites.md`](docs/composites.md) |
 | Candles Outside VWAP Band | `extensions/bougies_vwap.js` | Hides the candles that touch the band between two standard deviations of the daily or RTH VWAP; a notification on every close beyond a chosen deviation, the VWAP included | [`docs/bougies_vwap.md`](docs/bougies_vwap.md) |
+| Price Offset Line | `extensions/ligne_distance.js` | A horizontal line at a chosen distance from the last price, in ticks or points, above, below or both, from the right edge to the most recent visible candle that touches it, wick included | [`docs/ligne_distance.md`](docs/ligne_distance.md) |
 
 The getting-started guides are in French first, then in English.
 
@@ -102,6 +105,7 @@ node tests/profil_periode_test.mjs
 node tests/confluence_test.mjs
 node tests/composites_test.mjs
 node tests/bougies_vwap_test.mjs
+node tests/ligne_distance_test.mjs
 node tests/niveaux_sessions_test.mjs   # also loads Turning Trade's world sessions (TT_PAYLOAD)
 node tests/i18n_test.mjs   # English of every study, checked against Turning Trade's dictionary (TT_PAYLOAD)
 ```
