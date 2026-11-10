@@ -1,5 +1,5 @@
-// Single prints : les zones a une seule lettre du profil TPO d'une seance
-// close, celles du Market Profile de TT (suite de prix a une lettre prise
+// Niveaux de single prints : les zones a une seule lettre du profil TPO d'une
+// seance close, celles du Market Profile de TT (suite de prix a une lettre prise
 // entre deux niveaux plus fournis, les extremes du profil n'en sont pas),
 // lues dans les profils cuits par TT (_mp_daily pour RTH, _mp_daily_eth pour
 // la seance complete). Chaque zone porte cinq niveaux, 0, 25, 50, 75 et
@@ -14,6 +14,9 @@
 // retard ou coupee, plus de dix minutes sans barre, trou connu de TT sur
 // ticks, volume ou range) est masque, et une seance close attend que TT ait
 // cuit son profil apres la cloture.
+//
+// Sur le Market Profile, qui n'a pas de barres, les memes niveaux se posent
+// sur les profils que la page affiche : voir calculProfil.
 (function(){
 
 var ET = 'America/New_York';
@@ -35,10 +38,10 @@ var CUIT_MS = 120000;
 var ETAT = {sig:'', n:0, vu:0, prev:null, ip:-1, d:'', clos:'', W:{}, Z:[], act:[], pret:false, neufs:[], attente:'', raison:'', eps:0};
 
 // Anglais : nom, description, reglages, options, textes du canevas et notifications.
-var DESC = 'Zones de single prints du profil TPO des séances closes (celles du Market Profile de TT), avec leurs niveaux 0, 25, 50, 75 et 100 % depuis le bord d\'entrée ; chaque trait s\'arrête à la première mèche qui le touche.';
-var DESC_EN = 'Single print zones of the TPO profile of closed sessions (those of TT\'s Market Profile), with their 0, 25, 50, 75 and 100% levels from the entry edge; each line stops at the first wick that touches it.';
+var DESC = 'Niveaux 0, 25, 50, 75 et 100 % des zones de single prints des séances closes (celles du Market Profile de TT), depuis le bord d\'entrée ; chaque trait s\'arrête à la première mèche qui le touche, ou au premier profil qui le recroise sur le Market Profile.';
+var DESC_EN = '0, 25, 50, 75 and 100% levels of the single print zones of closed sessions (those of TT\'s Market Profile), from the entry edge; each line stops at the first wick that touches it, or at the first profile that crosses it on the Market Profile.';
 var EN = {
-  'Single prints':'Single prints', 'Profil TPO':'TPO profile', 'RTH':'RTH', 'Séance complète':'Full session',
+  'Niveaux de single prints':'Single Print Levels', 'Profil TPO':'TPO profile', 'RTH':'RTH', 'Séance complète':'Full session',
   'Hauteur minimale (ticks)':'Minimum height (ticks)',
   'Niveau 0 % (bord d\'entrée)':'0% level (entry edge)', 'Niveau 25 %':'25% level', 'Niveau 50 %':'50% level', 'Niveau 75 %':'75% level',
   'Niveau 100 % (bord opposé)':'100% level (far edge)', 'Masquer les niveaux pris':'Hide taken levels', 'Style':'Style',
@@ -49,7 +52,7 @@ var EN = {
   'Single prints : profil de TT en attente pour la séance du':'Single prints: waiting for TT\'s profile of session'
 };
 EN[DESC] = DESC_EN;
-EN[DESC + ' (extensions/single_prints.js)'] = DESC_EN + ' (extensions/single_prints.js)';
+EN[DESC + ' (extensions/single_prints_niveaux.js)'] = DESC_EN + ' (extensions/single_prints_niveaux.js)';
 
 // Le panneau d'etudes s'ouvre dans la fenetre du terminal, au-dessus des
 // graphes : le dictionnaire s'enregistre dans chaque fenetre parente.
@@ -341,6 +344,51 @@ function calcul(g, r){
   return S;
 }
 
+// Market Profile : la page n'a pas de barres. Les profils qu'elle affiche
+// (jours, jours fusionnes ou semaines : globales D, layoutCache, aggDay et
+// MODE de marketprofile_pro.html) donnent les zones, et un niveau est pris
+// par le premier profil suivant dont le haut et le bas l'encadrent, comme les
+// single prints prolongees de TT ; le profil affiche (RTH ou ETH) est celui
+// de la page, pas le reglage. Le dernier profil n'a pas de zones tant que sa
+// seance n'est pas close (une semaine ou un replay : jamais), mais il prend
+// les niveaux des precedents. Un jour ouvre absent entre deux profils
+// journaliers masque les niveaux encore vierges. `P` les profils dans l'ordre
+// de la page (`k` leur rang dans layoutCache), `Z` les zones ; chaque niveau
+// porte `j`, le profil de sa zone, et `fin`, celui qui le prend.
+var MP = {cle:'', P:[], Z:[]};
+function calculProfil(g){
+  var D0, LC, mode;
+  try{ D0 = D; LC = layoutCache; mode = MODE; }catch(_){ return null; }
+  if(!D0 || !D0.length || !LC || !LC.length) return null;
+  var der = D0[D0.length - 1], tick = +g.tick || 0.25, eps = tick / 4;
+  var ouvert = mode === 'weekly' || !!der._replay || !(Date.now() >= finMs(String(der.date).slice(0, 10), g.seance === 'eth' ? 'eth' : 'rth') + CUIT_MS);
+  var cle = [mode, g.seance, tick, D0.length, D0[0].date, der.date, der.hi, der.lo, ouvert,
+    LC.map(function(c){ return !c ? '' : c.merge ? c.merge.join('-') : c.i; }).join()].join('|');
+  if(cle === MP.cle) return MP;
+  var P = [], Z = [];
+  LC.forEach(function(c, k){
+    if(!c) return;
+    var a = c.merge ? c.merge[0] : c.i, b = c.merge ? c.merge[1] : c.i, J = c.merge ? aggDay(a, b) : D0[a];
+    if(J && D0[a] && D0[b]) P.push({k:k, J:J, a:String(D0[a].date).slice(0, 10), b:String(D0[b].date).slice(0, 10), close:D0[b].close, clos:!(ouvert && b === D0.length - 1)});
+  });
+  P.forEach(function(p, j){
+    if(!p.clos) return;
+    suites(p.J, tick).forEach(function(z){
+      var Zn = zone(z, p, tick, p.b);
+      Zn.N.forEach(function(v){
+        v.j = j;
+        for(var q = j + 1; q < P.length; q++){
+          if(mode !== 'weekly' && ouvresEntre(P[q - 1].b, P[q].a)){ v.masque = true; break; }
+          if(+P[q].J.lo - eps <= v.p && v.p <= +P[q].J.hi + eps){ v.fin = q; break; }
+        }
+      });
+      Z.push(Zn);
+    });
+  });
+  MP = {cle:cle, P:P, Z:Z};
+  return MP;
+}
+
 function pousser(titre, texte){
   try{
     if(typeof Notification === 'undefined') return;
@@ -370,11 +418,11 @@ function borne(g, deb, fin, x){
 }
 
 HFQExt.etude({
-  id:'single-prints',
-  nom:'Single prints',
+  id:'single-prints-niveaux',
+  nom:'Niveaux de single prints',
   famille:'Profil',
   desc:DESC,
-  graphes:['bougies','footprint'],
+  graphes:['profil','bougies','footprint'],
 
   reglages:[
     {k:'profil',     label:'Profil TPO',                 type:'select', defaut:'rth', options:[['rth','RTH'],['eth','Séance complète']]},
@@ -395,33 +443,50 @@ HFQExt.etude({
   ],
 
   calcul:calcul,
-  outils:{suites:suites, zone:zone, fenetre:fenetre, finMs:finMs, fichiers:FICHIERS},
+  outils:{suites:suites, zone:zone, fenetre:fenetre, finMs:finMs, fichiers:FICHIERS, calculProfil:calculProfil},
 
   dessine:function(g, r){
-    var S = calcul(g, r), F = g.cadre, e = g.echelle || 1, n = g.n | 0;
-    if(S.raison && r.legende) g.texte(F.gauche + 8 * e, F.haut + 14 * e, tr(S.raison), {couleur:'#8a929c', taille:10, align:'left'});
-    if(!S.pret) return;
-    notifier(S, g, r);
-    var deb = Math.max(0, g.premiere | 0), fin = Math.min(g.derniere | 0, n - 1);
-    if(fin < deb) return;
-    deb = Math.max(deb, borne(g, deb, fin, F.gauche));
-    fin = Math.min(fin, borne(g, deb, fin, F.droite + 1e-6) - 1);
+    var F = g.cadre, e = g.echelle || 1, n = g.n | 0, Zs, xs;
+    if(g.graphe === 'profil'){
+      var M = calculProfil(g), LC = M ? layoutCache : null;
+      if(!M) return;
+      Zs = M.Z;
+      // Du bord gauche du profil de la zone au bord gauche du profil qui prend le niveau.
+      xs = function(v){
+        var a = Math.max(LC[M.P[v.j].k].x0, F.gauche), b = v.fin >= 0 ? Math.min(LC[M.P[v.fin].k].x0, F.droite) : F.droite;
+        return b > a ? [a, b] : null;
+      };
+    }
+    else {
+      var S = calcul(g, r);
+      if(S.raison && r.legende) g.texte(F.gauche + 8 * e, F.haut + 14 * e, tr(S.raison), {couleur:'#8a929c', taille:10, align:'left'});
+      if(!S.pret) return;
+      notifier(S, g, r);
+      var deb = Math.max(0, g.premiere | 0), fin = Math.min(g.derniere | 0, n - 1);
+      if(fin < deb) return;
+      deb = Math.max(deb, borne(g, deb, fin, F.gauche));
+      fin = Math.min(fin, borne(g, deb, fin, F.droite + 1e-6) - 1);
+      Zs = S.Z;
+      // De la barre du print a celle qui prend le niveau, rogne au cadre.
+      xs = function(v){
+        return v.deb > fin || (v.fin >= 0 && v.fin < deb) ? null : [v.deb >= deb ? g.x(v.deb) : F.gauche, v.fin >= 0 && v.fin <= fin ? g.x(v.fin) : F.droite];
+      };
+    }
     var mini = +r.mini || 0, dec = (String(g.tick).split('.')[1] || '').length, T = [];
-    for(var z = 0; z < S.Z.length; z++){
-      var Z = S.Z[z];
-      // Zones trop fines, nees a droite du cadre ou hors de l'echelle de prix : rien a projeter.
-      if(Z.ticks < mini || Z.deb > fin || g.y(Z.bas) < F.haut || g.y(Z.haut) > F.bas) continue;
+    for(var z = 0; z < Zs.length; z++){
+      var Z = Zs[z];
+      // Zones trop fines ou hors de l'echelle de prix : rien a projeter.
+      if(Z.ticks < mini || g.y(Z.bas) < F.haut || g.y(Z.haut) > F.bas) continue;
       var yEtiq = null;
       for(var k = 0; k < Z.N.length; k++){
-        var v = Z.N[k];
-        if(!r['n' + v.q] || v.masque || v.deb > fin || (v.fin >= 0 && (r.masquePris || v.fin < deb))) continue;
+        var v = Z.N[k], X = !r['n' + v.q] || v.masque || (v.fin >= 0 && r.masquePris) ? null : xs(v);
+        if(!X) continue;
         var y = g.y(v.p);
         if(y < F.haut || y > F.bas) continue;
-        var x1 = v.fin >= 0 && v.fin <= fin ? g.x(v.fin) : F.droite;
-        T.push([v.deb >= deb ? g.x(v.deb) : F.gauche, y], [x1, y], [NaN, NaN]);
+        T.push([X[0], y], [X[1], y], [NaN, NaN]);
         // Etiquette au bout du trait ; deux niveaux a moins de 11 px ne portent que la premiere.
         if(r.etiq && (yEtiq === null || Math.abs(y - yEtiq) >= 11 * e)){
-          g.texte(x1 - 3 * e, y - 2 * e, 'SP ' + v.q + ' %  ' + v.p.toFixed(dec), {couleur:r.couleur, opacite:+r.op, taille:10, align:'right', base:'bottom'});
+          g.texte(X[1] - 3 * e, y - 2 * e, 'SP ' + v.q + ' %  ' + v.p.toFixed(dec), {couleur:r.couleur, opacite:+r.op, taille:10, align:'right', base:'bottom'});
           yEtiq = y;
         }
       }

@@ -1,4 +1,4 @@
-# Single prints · prise en main
+# Niveaux de single prints · prise en main
 
 *English version below.*
 
@@ -6,7 +6,7 @@
 
 ## En deux mots
 
-Les zones de single prints des séances closes, reportées sur le graphe en bougies ou en footprint, avec cinq niveaux par zone : 0, 25, 50, 75 et 100 %. Chaque trait court jusqu'à la première mèche qui le touche, puis s'arrête. On voit ce qui reste à combler d'une zone, et jusqu'où le prix y est déjà rentré.
+Les zones de single prints des séances closes, découpées en cinq niveaux : 0, 25, 50, 75 et 100 %. Sur un graphe en bougies ou en footprint, chaque trait court jusqu'à la première mèche qui le touche, puis s'arrête ; sur le Market Profile, jusqu'au premier profil qui le recroise. On voit ce qui reste à combler d'une zone, et jusqu'où le prix y est déjà rentré. L'étude « Single prints » native du Market Profile peint les zones ; celle-ci y ajoute les niveaux, et les porte sur les autres graphes.
 
 ## Un peu de maths
 
@@ -26,12 +26,13 @@ Ce que ça change pour la décision : des repères précis pour graduer un retou
 - **Étiquette** au bout du trait : `SP 50 %  7431.25`. Quand deux niveaux sont trop proches à l'écran, seul le premier est étiqueté.
 - **Une zone n'apparaît qu'à la clôture de sa séance** (16:00 ET en RTH), une fois que Turning Trade a recuit son profil, ce qui peut prendre un quart d'heure. La légende en haut à gauche dit alors quelle séance est attendue.
 - **Niveau absent** : il était encore vierge quand le graphe a un trou de données (barre de comblement, jour manquant, séance coupée ou entamée en retard, plus de dix minutes sans barre). Il a pu être pris dans le trou, donc il n'est pas tracé.
+- **Sur le Market Profile** : les zones sont celles des profils affichés (jours, jours fusionnés ou semaines, RTH ou ETH selon la page). Chaque trait part du bord gauche du profil de sa zone et s'arrête au bord gauche du premier profil suivant dont le haut et le bas encadrent le niveau, comme les single prints prolongées de TT. Le dernier profil n'a de zones qu'une fois sa séance close, mais il prend les niveaux des précédents.
 
 ## Configurer
 
 | Réglage | Rôle | Défaut |
 |---|---|---|
-| Profil TPO | RTH (09:30-16:00 ET) ou séance complète (18:00-17:00 ET) | RTH |
+| Profil TPO | RTH (09:30-16:00 ET) ou séance complète (18:00-17:00 ET) ; sans effet sur le Market Profile, qui a son propre choix | RTH |
 | Hauteur minimale (ticks) | Écarte les zones plus fines ; une rangée fait 5 ticks sur ES, 25 sur NQ | 10 |
 | Niveau 0 % (bord d'entrée) | Affiche le trait du bord d'entrée | cochée |
 | Niveau 25 %, 50 %, 75 % | Affiche chaque niveau intermédiaire | cochées |
@@ -39,26 +40,27 @@ Ce que ça change pour la décision : des repères précis pour graduer un retou
 | Masquer les niveaux pris | Ne garde que les niveaux encore vierges | décochée |
 | Couleur, Style, Épaisseur, Opacité | Aspect des traits et des étiquettes | jaune, plein, 1, 0,85 |
 | Étiquettes | Écrit le pourcentage et le prix au bout du trait | cochée |
-| Notification quand un niveau est pris | Une notification par barre pour les niveaux affichés qu'elle prend ; l'historique ne sonne pas | décochée |
+| Notification quand un niveau est pris | Une notification par barre pour les niveaux affichés qu'elle prend ; l'historique ne sonne pas ; bougies et footprint seulement | décochée |
 | Légende | Écrit en haut à gauche pourquoi rien n'est tracé, ou la séance attendue | cochée |
 
 ### Limites connues
 
 - Seules les séances dont la fin est chargée sur le graphe sont tracées : un graphe en ticks n'en porte que quelques-unes. La séance en cours n'a pas de zones.
-- Sur un graphe RTH, les prises de la nuit ne se voient pas : un niveau touché hors RTH reste tracé comme vierge. Le profil de séance complète demande un graphe ETH.
+- Sur un graphe RTH, et sur le Market Profile en RTH, les prises de la nuit ne se voient pas : un niveau touché hors RTH reste tracé comme vierge. Le profil de séance complète demande un graphe ETH.
+- Sur le Market Profile, la prise se juge au jour près (haut et bas du profil), pas à la barre, et une semaine en cours n'a pas de zones.
 - Unités de temps jusqu'à 60 minutes ; au-delà, une barre chevauche la clôture et rien n'est tracé.
 - Si le prix passe de l'autre côté d'une zone sans la toucher (gap), le 0 % reste au bord d'origine.
 - Heures des futures du CME (ES, NQ). Sans profil cuit par Turning Trade pour l'instrument, l'étude n'affiche que sa légende.
 
 ---
 
-# Single prints · getting started
+# Single Print Levels · getting started
 
 > **Disclaimer.** This study is a work in constant progress: it is not perfect, it depends on the TPO profiles Turning Trade bakes and on the bars loaded on the chart. It never replaces your own judgment or your visual reading of the chart. It suggests, you decide.
 
 ## In short
 
-The single print zones of closed sessions, carried onto the candlestick or footprint chart, with five levels per zone: 0, 25, 50, 75 and 100%. Each line runs to the first wick that touches it, then stops. You see what is left of a zone to fill, and how far price has already gone back into it.
+The single print zones of closed sessions, split into five levels: 0, 25, 50, 75 and 100%. On a candlestick or footprint chart, each line runs to the first wick that touches it, then stops; on the Market Profile, to the first profile that crosses it. You see what is left of a zone to fill, and how far price has already gone back into it. The Market Profile's native "Single prints" study paints the zones; this one adds the levels, and carries them onto the other charts.
 
 ## A bit of math
 
@@ -78,12 +80,13 @@ What it changes for the decision: precise marks to grade a return into the zone.
 - **Label** at the end of the line: `SP 50 %  7431.25`. When two levels are too close on screen, only the first one is labelled.
 - **A zone only appears at its session close** (16:00 ET for RTH), once Turning Trade has baked its profile again, which can take a quarter of an hour. The legend at the top left then names the session it is waiting for.
 - **Missing level**: it was still untouched when the chart has a data gap (filler bar, missing day, session cut short or started late, more than ten minutes without a bar). It may have been taken inside the gap, so it is not drawn.
+- **On the Market Profile**: the zones are those of the displayed profiles (days, merged days or weeks, RTH or ETH as the page is set). Each line starts at the left edge of its zone's profile and stops at the left edge of the first later profile whose high and low bracket the level, like TT's extended single prints. The last profile only has zones once its session has closed, but it takes the levels of earlier ones.
 
 ## Settings
 
 | Setting | Role | Default |
 |---|---|---|
-| TPO profile | RTH (09:30-16:00 ET) or full session (18:00-17:00 ET) | RTH |
+| TPO profile | RTH (09:30-16:00 ET) or full session (18:00-17:00 ET); no effect on the Market Profile, which has its own choice | RTH |
 | Minimum height (ticks) | Drops thinner zones; one row is 5 ticks on ES, 25 on NQ | 10 |
 | 0% level (entry edge) | Shows the entry edge line | checked |
 | 25%, 50%, 75% level | Shows each intermediate level | checked |
@@ -91,13 +94,14 @@ What it changes for the decision: precise marks to grade a return into the zone.
 | Hide taken levels | Keeps only the levels still untouched | unchecked |
 | Color, Style, Thickness, Opacity | Look of the lines and labels | yellow, solid, 1, 0.85 |
 | Labels | Writes the percentage and price at the end of the line | checked |
-| Notification when a level is taken | One notification per bar for the displayed levels it takes; history stays silent | unchecked |
+| Notification when a level is taken | One notification per bar for the displayed levels it takes; history stays silent; candles and footprint only | unchecked |
 | Legend | Writes at the top left why nothing is drawn, or the session awaited | checked |
 
 ### Known limits
 
 - Only sessions whose end is loaded on the chart are drawn: a tick chart holds just a few. The session in progress has no zones.
-- On an RTH chart, overnight touches cannot be seen: a level touched outside RTH stays drawn as untouched. The full-session profile needs an ETH chart.
+- On an RTH chart, and on the Market Profile in RTH, overnight touches cannot be seen: a level touched outside RTH stays drawn as untouched. The full-session profile needs an ETH chart.
+- On the Market Profile, a level is judged taken to the day (the profile's high and low), not to the bar, and a week in progress has no zones.
 - Timeframes up to 60 minutes; beyond that a bar straddles the close and nothing is drawn.
 - If price jumps to the other side of a zone without touching it (gap), 0% stays at the original edge.
 - CME futures hours (ES, NQ). Without a profile baked by Turning Trade for the instrument, the study only shows its legend.
